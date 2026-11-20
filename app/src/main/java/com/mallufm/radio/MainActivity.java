@@ -1,5 +1,6 @@
 package com.mallufm.radio;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -15,8 +16,8 @@ import android.os.Bundle;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.animation.LinearInterpolator;
 import android.widget.Button;
-import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -52,9 +53,11 @@ public class MainActivity extends Activity {
     private TextView freqText;
     private TextView channelNameText;
     private TextView statusText;
+    private TextView volumeText;
     private LinearLayout presetLayout;
     private int currentIndex = -1;
     private boolean isPlaying = false;
+    private float volumeLevel = 0.8f;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -69,7 +72,7 @@ public class MainActivity extends Activity {
         LinearLayout topPanel = new LinearLayout(this);
         topPanel.setOrientation(LinearLayout.VERTICAL);
         topPanel.setBackgroundColor(Color.parseColor("#08131E"));
-        topPanel.setPadding(16, 24, 16, 20);
+        topPanel.setPadding(16, 24, 16, 16);
 
         statusText = new TextView(this);
         statusText.setText("Loading Malayalam FM...");
@@ -80,17 +83,17 @@ public class MainActivity extends Activity {
 
         scaleView = new TunerScaleView(this);
         LinearLayout.LayoutParams scaleParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(64));
-        scaleParams.topMargin = dp(8);
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(60));
+        scaleParams.topMargin = dp(6);
         topPanel.addView(scaleView, scaleParams);
 
         freqText = new TextView(this);
         freqText.setText("98.1 MHz");
-        freqText.setTextSize(38f);
+        freqText.setTextSize(36f);
         freqText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         freqText.setTextColor(Color.parseColor("#E0F2FE"));
         freqText.setGravity(Gravity.CENTER);
-        freqText.setPadding(0, dp(4), 0, 0);
+        freqText.setPadding(0, dp(2), 0, 0);
         topPanel.addView(freqText);
 
         channelNameText = new TextView(this);
@@ -102,16 +105,25 @@ public class MainActivity extends Activity {
         channelNameText.setPadding(0, dp(2), 0, 0);
         topPanel.addView(channelNameText);
 
+        volumeText = new TextView(this);
+        volumeText.setText("VOLUME: 80%  (Rotate Knob)");
+        volumeText.setTextSize(12f);
+        volumeText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        volumeText.setTextColor(Color.parseColor("#4ADE80"));
+        volumeText.setGravity(Gravity.CENTER);
+        volumeText.setPadding(0, dp(4), 0, 0);
+        topPanel.addView(volumeText);
+
         LinearLayout.LayoutParams topParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.44f);
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.46f);
         root.addView(topPanel, topParams);
 
-        // Middle Rotary Knob with < and > Tuning Buttons
+        // Middle Rotary Volume Knob with Ambient Light & < > Tuning Buttons
         LinearLayout middlePanel = new LinearLayout(this);
         middlePanel.setOrientation(LinearLayout.VERTICAL);
         middlePanel.setGravity(Gravity.CENTER);
         middlePanel.setBackgroundColor(Color.parseColor("#040609"));
-        middlePanel.setPadding(16, 12, 16, 12);
+        middlePanel.setPadding(16, 10, 16, 10);
 
         LinearLayout dialRow = new LinearLayout(this);
         dialRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -127,16 +139,14 @@ public class MainActivity extends Activity {
         dialRow.addView(prevBtn);
 
         knobView = new TunerKnobView(this);
-        LinearLayout.LayoutParams knobParams = new LinearLayout.LayoutParams(dp(185), dp(185));
-        knobParams.leftMargin = dp(18);
-        knobParams.rightMargin = dp(18);
-        knobView.setOnClickListener(new View.OnClickListener() {
+        LinearLayout.LayoutParams knobParams = new LinearLayout.LayoutParams(dp(205), dp(205));
+        knobParams.leftMargin = dp(14);
+        knobParams.rightMargin = dp(14);
+        knobView.setOnRotateListener(new TunerKnobView.OnRotateListener() {
             @Override
-            public void onClick(View v) {
-                if (!channels.isEmpty()) {
-                    int next = (currentIndex + 1) % channels.size();
-                    playChannel(next);
-                }
+            public void onRotateDelta(float deltaDegrees, float knobAngle) {
+                float nextVol = volumeLevel + (deltaDegrees / 270f);
+                setAppVolume(nextVol, knobAngle);
             }
         });
         dialRow.addView(knobView, knobParams);
@@ -156,7 +166,7 @@ public class MainActivity extends Activity {
         LinearLayout actionRow = new LinearLayout(this);
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
         actionRow.setGravity(Gravity.CENTER);
-        actionRow.setPadding(0, dp(10), 0, 0);
+        actionRow.setPadding(0, dp(8), 0, 0);
 
         Button playPauseBtn = createActionButton("PLAY / STOP");
         playPauseBtn.setOnClickListener(new View.OnClickListener() {
@@ -190,7 +200,7 @@ public class MainActivity extends Activity {
         middlePanel.addView(actionRow);
 
         LinearLayout.LayoutParams midParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.42f);
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.40f);
         root.addView(middlePanel, midParams);
 
         // Bottom Preset Bar
@@ -212,6 +222,7 @@ public class MainActivity extends Activity {
         loadDefaultChannels();
         renderChannelButtons();
         updateTunerDisplay(-1);
+        setAppVolume(volumeLevel, (volumeLevel - 0.5f) * 270f);
         fetchChannelsAsync(false);
     }
 
@@ -241,6 +252,28 @@ public class MainActivity extends Activity {
         return b;
     }
 
+    private void setAppVolume(float level, float knobAngle) {
+        volumeLevel = Math.max(0f, Math.min(1f, level));
+        int pct = Math.round(volumeLevel * 100f);
+        if (volumeText != null) {
+            volumeText.setText(pct == 0 ? "VOLUME: MUTED (0%)" : ("VOLUME: " + pct + "%"));
+            volumeText.setTextColor(pct == 0 ? Color.parseColor("#F87171") : Color.parseColor("#4ADE80"));
+        }
+        if (knobView != null) {
+            knobView.setAngle(knobAngle);
+        }
+        applyVolumeToPlayer();
+    }
+
+    private void applyVolumeToPlayer() {
+        if (mediaPlayer != null) {
+            try {
+                mediaPlayer.setVolume(volumeLevel, volumeLevel);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
     private float computeFrequency(int index, int total) {
         if (total <= 1) return 98.1f;
         float start = 90.0f;
@@ -261,7 +294,6 @@ public class MainActivity extends Activity {
             freqText.setText("98.1 MHz");
             channelNameText.setText("No Channels");
             scaleView.setFrequency(98.1f);
-            knobView.setAngle(0f);
             return;
         }
         int idx = (index >= 0 && index < channels.size()) ? index : 0;
@@ -269,8 +301,6 @@ public class MainActivity extends Activity {
         freqText.setText(String.format("%.1f MHz", ch.freq));
         channelNameText.setText(ch.name);
         scaleView.setFrequency(ch.freq);
-        float angle = (idx * 360f) / Math.max(1, channels.size());
-        knobView.setAngle(angle);
         highlightPresets(idx);
     }
 
@@ -404,6 +434,7 @@ public class MainActivity extends Activity {
             mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                 @Override
                 public void onPrepared(MediaPlayer mp) {
+                    applyVolumeToPlayer();
                     mp.start();
                     isPlaying = true;
                     statusText.setText("Playing: " + ch.name);
@@ -447,6 +478,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (knobView != null) {
+            knobView.stopAmbientAnimation();
+        }
         stopPlayback();
     }
 
@@ -484,14 +518,12 @@ public class MainActivity extends Activity {
             float minFreq = 88.0f;
             float maxFreq = 108.0f;
 
-            // Major labels every 4 MHz
             for (int f = 90; f <= 106; f += 4) {
                 float frac = (f - minFreq) / (maxFreq - minFreq);
                 float x = frac * w;
                 canvas.drawText(String.valueOf(f), x, h * 0.35f, textPaint);
             }
 
-            // Ruler ticks
             float tickTop = h * 0.55f;
             int totalTicks = 40;
             for (int i = 0; i <= totalTicks; i++) {
@@ -500,7 +532,6 @@ public class MainActivity extends Activity {
                 canvas.drawLine(x, tickTop, x, tickTop + tickLen, linePaint);
             }
 
-            // Red indicator line
             float clamped = Math.max(minFreq, Math.min(maxFreq, frequency));
             float nx = ((clamped - minFreq) / (maxFreq - minFreq)) * w;
             canvas.drawLine(nx, h * 0.15f, nx, h * 0.92f, needlePaint);
@@ -508,9 +539,18 @@ public class MainActivity extends Activity {
     }
 
     private static class TunerKnobView extends View {
+        interface OnRotateListener {
+            void onRotateDelta(float deltaDegrees, float knobAngle);
+        }
+
         private float angle = 0f;
         private float lastTouchAngle = 0f;
-        private float accumulatedDelta = 0f;
+        private float hue = 0f;
+        private ValueAnimator ambientAnimator;
+        private OnRotateListener rotateListener;
+
+        private final Paint ambientGlowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ambientRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint outerRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint facePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint ledPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -520,6 +560,39 @@ public class MainActivity extends Activity {
             outerRingPaint.setColor(Color.parseColor("#1F2937"));
             facePaint.setColor(Color.parseColor("#9CA3AF"));
             ledPaint.setColor(Color.parseColor("#22C55E"));
+
+            ambientRingPaint.setStyle(Paint.Style.STROKE);
+            ambientRingPaint.setStrokeWidth(7f);
+
+            startAmbientAnimation();
+        }
+
+        private void startAmbientAnimation() {
+            if (ambientAnimator != null) return;
+            ambientAnimator = ValueAnimator.ofFloat(0f, 360f);
+            ambientAnimator.setDuration(9000L);
+            ambientAnimator.setRepeatCount(ValueAnimator.INFINITE);
+            ambientAnimator.setRepeatMode(ValueAnimator.RESTART);
+            ambientAnimator.setInterpolator(new LinearInterpolator());
+            ambientAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override
+                public void onAnimationUpdate(ValueAnimator animation) {
+                    hue = (Float) animation.getAnimatedValue();
+                    invalidate();
+                }
+            });
+            ambientAnimator.start();
+        }
+
+        void stopAmbientAnimation() {
+            if (ambientAnimator != null) {
+                ambientAnimator.cancel();
+                ambientAnimator = null;
+            }
+        }
+
+        void setOnRotateListener(OnRotateListener listener) {
+            this.rotateListener = listener;
         }
 
         void setAngle(float angle) {
@@ -537,19 +610,18 @@ public class MainActivity extends Activity {
 
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 lastTouchAngle = touchAngle;
-                accumulatedDelta = 0f;
+                return true;
             } else if (event.getAction() == MotionEvent.ACTION_MOVE) {
                 float diff = touchAngle - lastTouchAngle;
                 if (diff > 180f) diff -= 360f;
                 if (diff < -180f) diff += 360f;
                 angle += diff;
-                accumulatedDelta += diff;
                 lastTouchAngle = touchAngle;
                 invalidate();
-                if (Math.abs(accumulatedDelta) >= 45f) {
-                    accumulatedDelta = 0f;
-                    performClick();
+                if (rotateListener != null) {
+                    rotateListener.onRotateDelta(diff, angle);
                 }
+                return true;
             }
             return super.onTouchEvent(event);
         }
@@ -561,16 +633,38 @@ public class MainActivity extends Activity {
             float h = getHeight();
             float cx = w / 2f;
             float cy = h / 2f;
-            float radius = Math.min(cx, cy) * 0.92f;
+            float maxR = Math.min(cx, cy);
+            float knobRadius = maxR * 0.78f;
 
+            int primaryColor = Color.HSVToColor(220, new float[]{hue, 0.95f, 1.0f});
+            int secondaryColor = Color.HSVToColor(220, new float[]{(hue + 90f) % 360f, 0.95f, 1.0f});
+            int glowCenter = Color.HSVToColor(115, new float[]{hue, 0.90f, 1.0f});
+            int glowMid = Color.HSVToColor(45, new float[]{(hue + 45f) % 360f, 0.90f, 1.0f});
+
+            // Soft outer ambient halo
+            ambientGlowPaint.setShader(new RadialGradient(
+                    cx, cy, maxR * 0.98f,
+                    new int[]{glowCenter, glowMid, Color.TRANSPARENT},
+                    new float[]{0.68f, 0.86f, 1.0f},
+                    Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, maxR * 0.98f, ambientGlowPaint);
+
+            // Crisp ambient light ring around the knob
+            ambientRingPaint.setShader(new LinearGradient(
+                    cx - knobRadius, cy - knobRadius, cx + knobRadius, cy + knobRadius,
+                    primaryColor, secondaryColor, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, knobRadius * 1.05f, ambientRingPaint);
+
+            // Outer dark metallic bezel
             outerRingPaint.setShader(new LinearGradient(
                     0, 0, w, h,
                     Color.parseColor("#27272A"),
                     Color.parseColor("#09090B"),
                     Shader.TileMode.CLAMP));
-            canvas.drawCircle(cx, cy, radius, outerRingPaint);
+            canvas.drawCircle(cx, cy, knobRadius, outerRingPaint);
 
-            float innerR = radius * 0.72f;
+            // Inner metallic knob face
+            float innerR = knobRadius * 0.74f;
             facePaint.setShader(new RadialGradient(
                     cx, cy, innerR,
                     new int[]{Color.parseColor("#E4E4E7"), Color.parseColor("#71717A"), Color.parseColor("#3F3F46")},
@@ -578,9 +672,10 @@ public class MainActivity extends Activity {
                     Shader.TileMode.CLAMP));
             canvas.drawCircle(cx, cy, innerR, facePaint);
 
+            // Rotating green position indicator dot
             canvas.save();
             canvas.rotate(angle, cx, cy);
-            canvas.drawCircle(cx, cy - innerR * 0.65f, radius * 0.045f, ledPaint);
+            canvas.drawCircle(cx, cy - innerR * 0.65f, knobRadius * 0.05f, ledPaint);
             canvas.restore();
         }
     }
