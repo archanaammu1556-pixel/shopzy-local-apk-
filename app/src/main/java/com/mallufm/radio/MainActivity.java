@@ -10,6 +10,7 @@ import android.graphics.Paint;
 import android.graphics.RadialGradient;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.media.audiofx.Equalizer;
@@ -19,6 +20,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -50,6 +52,7 @@ public class MainActivity extends Activity {
     private final List<Channel> channels = new ArrayList<>();
     private MediaPlayer mediaPlayer;
     private Equalizer equalizer;
+    private CarbonBgView bgView;
     private TunerScaleView scaleView;
     private TunerKnobView knobView;
     private TunerKnobView bassKnob;
@@ -77,15 +80,21 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        FrameLayout frameRoot = new FrameLayout(this);
+        bgView = new CarbonBgView(this);
+        frameRoot.addView(bgView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.parseColor("#05080D"));
+        root.setBackgroundColor(Color.TRANSPARENT);
+        root.setPadding(dp(8), dp(8), dp(8), dp(8));
         root.setWeightSum(1f);
 
         // Top Tuner Scale & Frequency Display
         LinearLayout topPanel = new LinearLayout(this);
         topPanel.setOrientation(LinearLayout.VERTICAL);
-        topPanel.setBackgroundColor(Color.parseColor("#08131E"));
+        topPanel.setBackground(createGlassCard(Color.parseColor("#CC0D192B"), Color.parseColor("#4438BDF8"), dp(16)));
         topPanel.setPadding(16, 14, 16, 8);
 
         statusText = new TextView(this);
@@ -134,7 +143,7 @@ public class MainActivity extends Activity {
         LinearLayout middlePanel = new LinearLayout(this);
         middlePanel.setOrientation(LinearLayout.VERTICAL);
         middlePanel.setGravity(Gravity.CENTER);
-        middlePanel.setBackgroundColor(Color.parseColor("#040609"));
+        middlePanel.setBackgroundColor(Color.TRANSPARENT);
         middlePanel.setPadding(12, 4, 12, 4);
 
         LinearLayout dialRow = new LinearLayout(this);
@@ -217,7 +226,7 @@ public class MainActivity extends Activity {
         // Equalizer Section with Small Ambient Color Knobs (Bass / Mid / Treble)
         LinearLayout eqPanel = new LinearLayout(this);
         eqPanel.setOrientation(LinearLayout.VERTICAL);
-        eqPanel.setBackgroundColor(Color.parseColor("#070C14"));
+        eqPanel.setBackground(createGlassCard(Color.parseColor("#B80B1220"), Color.parseColor("#3394A3B8"), dp(16)));
         eqPanel.setPadding(dp(10), dp(5), dp(10), dp(5));
 
         LinearLayout eqHeader = new LinearLayout(this);
@@ -311,7 +320,7 @@ public class MainActivity extends Activity {
 
         // Bottom Channel Preset Bar
         HorizontalScrollView presetScroll = new HorizontalScrollView(this);
-        presetScroll.setBackgroundColor(Color.parseColor("#0B0E14"));
+        presetScroll.setBackground(createGlassCard(Color.parseColor("#B80B1220"), Color.parseColor("#2838BDF8"), dp(14)));
         presetScroll.setFillViewport(true);
 
         presetLayout = new LinearLayout(this);
@@ -324,7 +333,9 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.14f);
         root.addView(presetScroll, botParams);
 
-        setContentView(root);
+        frameRoot.addView(root, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        setContentView(frameRoot);
         syncEqKnobsAndLabels("BASS+");
         loadDefaultChannels();
         renderChannelButtons();
@@ -714,6 +725,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (bgView != null) bgView.stopAmbientAnimation();
         if (knobView != null) knobView.stopAmbientAnimation();
         if (bassKnob != null) bassKnob.stopAmbientAnimation();
         if (midKnob != null) midKnob.stopAmbientAnimation();
@@ -913,6 +925,94 @@ public class MainActivity extends Activity {
             canvas.rotate(angle, cx, cy);
             canvas.drawCircle(cx, cy - innerR * 0.65f, knobRadius * 0.055f, ledPaint);
             canvas.restore();
+        }
+    }
+
+    private GradientDrawable createGlassCard(int fillColor, int strokeColor, int radiusPx) {
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(fillColor);
+        gd.setCornerRadius(radiusPx);
+        gd.setStroke(dp(1), strokeColor);
+        return gd;
+    }
+
+    private static class CarbonBgView extends View {
+        private float hue = 200f;
+        private ValueAnimator bgAnimator;
+        private final Paint basePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint auroraPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        CarbonBgView(Context context) {
+            super(context);
+            gridPaint.setColor(Color.parseColor("#1438BDF8"));
+            gridPaint.setStrokeWidth(1.2f);
+            dotPaint.setColor(Color.parseColor("#1CE2E8F0"));
+            startAmbientAnimation();
+        }
+
+        private void startAmbientAnimation() {
+            if (bgAnimator != null) return;
+            bgAnimator = ValueAnimator.ofFloat(0f, 360f);
+            bgAnimator.setDuration(14000L);
+            bgAnimator.setRepeatCount(ValueAnimator.INFINITE);
+            bgAnimator.setRepeatMode(ValueAnimator.RESTART);
+            bgAnimator.setInterpolator(new LinearInterpolator());
+            bgAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override
+                public void onAnimationUpdate(ValueAnimator animation) {
+                    hue = (Float) animation.getAnimatedValue();
+                    invalidate();
+                }
+            });
+            bgAnimator.start();
+        }
+
+        void stopAmbientAnimation() {
+            if (bgAnimator != null) {
+                bgAnimator.cancel();
+                bgAnimator = null;
+            }
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= 0 || h <= 0) return;
+
+            basePaint.setShader(new LinearGradient(
+                    0, 0, w, h,
+                    new int[]{
+                        Color.parseColor("#060B19"),
+                        Color.parseColor("#0F2238"),
+                        Color.parseColor("#070D1A")
+                    },
+                    new float[]{0f, 0.5f, 1f},
+                    Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, w, h, basePaint);
+
+            int glow1 = Color.HSVToColor(58, new float[]{hue, 0.85f, 0.95f});
+            int glow2 = Color.HSVToColor(28, new float[]{(hue + 75f) % 360f, 0.85f, 0.90f});
+            auroraPaint.setShader(new RadialGradient(
+                    w * 0.5f, h * 0.45f, Math.max(w, h) * 0.65f,
+                    new int[]{glow1, glow2, Color.TRANSPARENT},
+                    new float[]{0f, 0.55f, 1f},
+                    Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, w, h, auroraPaint);
+
+            float step = 28f;
+            for (float x = 0; x < w; x += step) {
+                canvas.drawLine(x, 0, x, h, gridPaint);
+            }
+            for (float y = 0; y < h; y += step) {
+                canvas.drawLine(0, y, w, y, gridPaint);
+                for (float x = (y % (step * 2) == 0 ? 0 : step / 2f); x < w; x += step) {
+                    canvas.drawCircle(x, y, 1.5f, dotPaint);
+                }
+            }
         }
     }
 }
