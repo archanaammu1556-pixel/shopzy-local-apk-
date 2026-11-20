@@ -8,6 +8,7 @@ import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.RadialGradient;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -731,6 +732,286 @@ public class MainActivity extends Activity {
         if (midKnob != null) midKnob.stopAmbientAnimation();
         if (trebleKnob != null) trebleKnob.stopAmbientAnimation();
         stopPlayback();
+    }
+
+    private static class TunerScaleView extends View {
+        private float frequency = 98.1f;
+        private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint needlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        TunerScaleView(Context context) {
+            super(context);
+            linePaint.setColor(Color.parseColor("#475569"));
+            linePaint.setStrokeWidth(2f);
+
+            textPaint.setColor(Color.parseColor("#94A3B8"));
+            textPaint.setTextSize(24f);
+            textPaint.setTextAlign(Paint.Align.CENTER);
+
+            needlePaint.setColor(Color.parseColor("#EF4444"));
+            needlePaint.setStrokeWidth(4f);
+        }
+
+        void setFrequency(float freq) {
+            this.frequency = freq;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= 0 || h <= 0) return;
+
+            float minFreq = 88.0f;
+            float maxFreq = 108.0f;
+
+            for (int f = 90; f <= 106; f += 4) {
+                float frac = (f - minFreq) / (maxFreq - minFreq);
+                float x = frac * w;
+                canvas.drawText(String.valueOf(f), x, h * 0.35f, textPaint);
+            }
+
+            float tickTop = h * 0.55f;
+            int totalTicks = 40;
+            for (int i = 0; i <= totalTicks; i++) {
+                float x = (i * w) / totalTicks;
+                float tickLen = (i % 5 == 0) ? h * 0.25f : h * 0.14f;
+                canvas.drawLine(x, tickTop, x, tickTop + tickLen, linePaint);
+            }
+
+            float clamped = Math.max(minFreq, Math.min(maxFreq, frequency));
+            float nx = ((clamped - minFreq) / (maxFreq - minFreq)) * w;
+            canvas.drawLine(nx, h * 0.15f, nx, h * 0.92f, needlePaint);
+        }
+    }
+
+    private static class TunerKnobView extends View {
+        interface OnRotateListener {
+            void onRotateDelta(float deltaDegrees, float knobAngle);
+        }
+
+        private float angle = 0f;
+        private float lastTouchAngle = 0f;
+        private float hue;
+        private final long cycleDurationMs;
+        private ValueAnimator ambientAnimator;
+        private OnRotateListener rotateListener;
+
+        private final Paint ambientGlowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ambientRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint outerRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint facePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ledPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        TunerKnobView(Context context, long cycleDurationMs, float initialHue) {
+            super(context);
+            this.cycleDurationMs = cycleDurationMs;
+            this.hue = initialHue % 360f;
+
+            outerRingPaint.setColor(Color.parseColor("#1F2937"));
+            facePaint.setColor(Color.parseColor("#9CA3AF"));
+            ledPaint.setColor(Color.parseColor("#22C55E"));
+
+            ambientRingPaint.setStyle(Paint.Style.STROKE);
+            ambientRingPaint.setStrokeWidth(5.5f);
+
+            startAmbientAnimation();
+        }
+
+        private void startAmbientAnimation() {
+            if (ambientAnimator != null) return;
+            ambientAnimator = ValueAnimator.ofFloat(hue, hue + 360f);
+            ambientAnimator.setDuration(cycleDurationMs);
+            ambientAnimator.setRepeatCount(ValueAnimator.INFINITE);
+            ambientAnimator.setRepeatMode(ValueAnimator.RESTART);
+            ambientAnimator.setInterpolator(new LinearInterpolator());
+            ambientAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override
+                public void onAnimationUpdate(ValueAnimator animation) {
+                    hue = ((Float) animation.getAnimatedValue()) % 360f;
+                    invalidate();
+                }
+            });
+            ambientAnimator.start();
+        }
+
+        void stopAmbientAnimation() {
+            if (ambientAnimator != null) {
+                ambientAnimator.cancel();
+                ambientAnimator = null;
+            }
+        }
+
+        void setOnRotateListener(OnRotateListener listener) {
+            this.rotateListener = listener;
+        }
+
+        void setAngle(float angle) {
+            this.angle = angle;
+            invalidate();
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            float cx = getWidth() / 2f;
+            float cy = getHeight() / 2f;
+            float dx = event.getX() - cx;
+            float dy = event.getY() - cy;
+            float touchAngle = (float) Math.toDegrees(Math.atan2(dy, dx));
+
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                lastTouchAngle = touchAngle;
+                return true;
+            } else if (event.getAction() == MotionEvent.ACTION_MOVE) {
+                float diff = touchAngle - lastTouchAngle;
+                if (diff > 180f) diff -= 360f;
+                if (diff < -180f) diff += 360f;
+                angle += diff;
+                lastTouchAngle = touchAngle;
+                invalidate();
+                if (rotateListener != null) {
+                    rotateListener.onRotateDelta(diff, angle);
+                }
+                return true;
+            }
+            return super.onTouchEvent(event);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            float cx = w / 2f;
+            float cy = h / 2f;
+            float maxR = Math.min(cx, cy);
+            float knobRadius = maxR * 0.78f;
+
+            int primaryColor = Color.HSVToColor(225, new float[]{hue, 0.95f, 1.0f});
+            int secondaryColor = Color.HSVToColor(225, new float[]{(hue + 90f) % 360f, 0.95f, 1.0f});
+            int glowCenter = Color.HSVToColor(120, new float[]{hue, 0.90f, 1.0f});
+            int glowMid = Color.HSVToColor(45, new float[]{(hue + 45f) % 360f, 0.90f, 1.0f});
+
+            ambientGlowPaint.setShader(new RadialGradient(
+                    cx, cy, maxR * 0.98f,
+                    new int[]{glowCenter, glowMid, Color.TRANSPARENT},
+                    new float[]{0.66f, 0.86f, 1.0f},
+                    Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, maxR * 0.98f, ambientGlowPaint);
+
+            ambientRingPaint.setShader(new LinearGradient(
+                    cx - knobRadius, cy - knobRadius, cx + knobRadius, cy + knobRadius,
+                    primaryColor, secondaryColor, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, knobRadius * 1.05f, ambientRingPaint);
+
+            outerRingPaint.setShader(new LinearGradient(
+                    0, 0, w, h,
+                    Color.parseColor("#27272A"),
+                    Color.parseColor("#09090B"),
+                    Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, knobRadius, outerRingPaint);
+
+            float innerR = knobRadius * 0.74f;
+            facePaint.setShader(new RadialGradient(
+                    cx, cy, innerR,
+                    new int[]{Color.parseColor("#E4E4E7"), Color.parseColor("#71717A"), Color.parseColor("#3F3F46")},
+                    new float[]{0.0f, 0.75f, 1.0f},
+                    Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, innerR, facePaint);
+
+            canvas.save();
+            canvas.rotate(angle, cx, cy);
+            canvas.drawCircle(cx, cy - innerR * 0.65f, knobRadius * 0.055f, ledPaint);
+            canvas.restore();
+        }
+    }
+
+    private GradientDrawable createGlassCard(int fillColor, int strokeColor, int radiusPx) {
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(fillColor);
+        gd.setCornerRadius(radiusPx);
+        gd.setStroke(dp(1), strokeColor);
+        return gd;
+    }
+
+    private static class SpectrumBgView extends View {
+        private float hue = 200f;
+        private ValueAnimator bgAnimator;
+        private final Paint basePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint barPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF barRect = new RectF();
+
+        SpectrumBgView(Context context) {
+            super(context);
+            startAmbientAnimation();
+        }
+
+        private void startAmbientAnimation() {
+            if (bgAnimator != null) return;
+            bgAnimator = ValueAnimator.ofFloat(0f, 360f);
+            bgAnimator.setDuration(9000L);
+            bgAnimator.setRepeatCount(ValueAnimator.INFINITE);
+            bgAnimator.setRepeatMode(ValueAnimator.RESTART);
+            bgAnimator.setInterpolator(new LinearInterpolator());
+            bgAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override
+                public void onAnimationUpdate(ValueAnimator animation) {
+                    hue = (Float) animation.getAnimatedValue();
+                    invalidate();
+                }
+            });
+            bgAnimator.start();
+        }
+
+        void stopAmbientAnimation() {
+            if (bgAnimator != null) {
+                bgAnimator.cancel();
+                bgAnimator = null;
+            }
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= 0 || h <= 0) return;
+
+            basePaint.setShader(new LinearGradient(
+                    0, 0, 0, h,
+                    new int[]{
+                        Color.parseColor("#040711"),
+                        Color.parseColor("#091326"),
+                        Color.parseColor("#040711")
+                    },
+                    new float[]{0f, 0.5f, 1f},
+                    Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, w, h, basePaint);
+
+            int barCount = 26;
+            float gap = 6f;
+            float barWidth = Math.max(4f, (w - (barCount + 1) * gap) / barCount);
+            float phase = (hue / 360f) * (float) (Math.PI * 2.0);
+
+            for (int i = 0; i < barCount; i++) {
+                float norm = (float) Math.abs(Math.sin(phase + i * 0.42f)) * 0.72f
+                        + (float) Math.abs(Math.cos(phase * 1.35f - i * 0.25f)) * 0.28f;
+                float barH = h * (0.10f + 0.52f * norm);
+                float left = gap + i * (barWidth + gap);
+                float top = h * 0.52f - barH * 0.5f;
+                float bottom = h * 0.52f + barH * 0.5f;
+
+                int barColor = Color.HSVToColor(
+                        82,
+                        new float[]{(hue + i * 9f) % 360f, 0.90f, 1.0f});
+                barPaint.setColor(barColor);
+                barRect.set(left, top, left + barWidth, bottom);
+                canvas.drawRoundRect(barRect, 6f, 6f, barPaint);
+            }
+        }
     }
 
     private static class TunerScaleView extends View {
