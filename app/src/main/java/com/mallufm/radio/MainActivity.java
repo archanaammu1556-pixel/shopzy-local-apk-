@@ -19,6 +19,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
@@ -368,6 +369,7 @@ public class MainActivity extends Activity {
         renderChannelButtons();
         updateTunerDisplay(-1);
         setAppVolume(volumeLevel, (volumeLevel - 0.5f) * 270f);
+        syncVolumeFromSystem();
         fetchChannelsAsync(false);
     }
 
@@ -574,6 +576,44 @@ public class MainActivity extends Activity {
             }
         }
         return bestIdx;
+    }
+
+    private void syncVolumeFromSystem() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+                int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                if (max > 0) {
+                    float ratio = (float) cur / (float) max;
+                    float knobAngle = (ratio - 0.5f) * 270f;
+                    setAppVolume(ratio, knobAngle);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                int dir = (keyCode == KeyEvent.KEYCODE_VOLUME_UP)
+                        ? AudioManager.ADJUST_RAISE
+                        : AudioManager.ADJUST_LOWER;
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI);
+                int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+                int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                if (max > 0) {
+                    float ratio = (float) cur / (float) max;
+                    float knobAngle = (ratio - 0.5f) * 270f;
+                    setAppVolume(ratio, knobAngle);
+                }
+                return true;
+            }
+        }
+        return super.onKeyDown(keyCode, event);
     }
 
     private void tuneStep(int delta) {
