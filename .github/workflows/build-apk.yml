@@ -1,4 +1,5 @@
 name: Build Shopzy Local APK
+
 on:
   workflow_dispatch:
   push:
@@ -9,15 +10,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+
       - name: Grant execute permission for gradle
         run: chmod +x gradlew || true
+
       - name: Build Debug APK
-        run: gradle assembleDebug --stacktrace
+        run: |
+          if [ -f "./gradlew" ]; then
+            ./gradlew assembleDebug --stacktrace --no-daemon
+          else
+            gradle assembleDebug --stacktrace --no-daemon
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: shopzy-local-apk
