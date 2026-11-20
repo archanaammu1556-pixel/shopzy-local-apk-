@@ -7,7 +7,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
-import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
@@ -72,7 +71,6 @@ public class MainActivity extends Activity {
     private boolean isPlaying = false;
     private float volumeLevel = 0.8f;
 
-    // Normalized -100 to +100 EQ controls
     private int bassLevel = 25;
     private int midLevel = 0;
     private int trebleLevel = 15;
@@ -89,14 +87,14 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.TRANSPARENT);
-        root.setPadding(dp(8), dp(8), dp(8), dp(8));
+        root.setPadding(dp(10), dp(10), dp(10), dp(10));
         root.setWeightSum(1f);
 
-        // Top Tuner Scale & Frequency Display
+        // Top Glassmorphic Tuner Scale & Frequency Display Card
         LinearLayout topPanel = new LinearLayout(this);
         topPanel.setOrientation(LinearLayout.VERTICAL);
         topPanel.setBackground(createGlassCard(Color.parseColor("#CC0D192B"), Color.parseColor("#4438BDF8"), dp(16)));
-        topPanel.setPadding(16, 14, 16, 8);
+        topPanel.setPadding(dp(14), dp(10), dp(14), dp(8));
 
         statusText = new TextView(this);
         statusText.setText("Loading Malayalam FM...");
@@ -107,7 +105,7 @@ public class MainActivity extends Activity {
 
         scaleView = new TunerScaleView(this);
         LinearLayout.LayoutParams scaleParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
         scaleParams.topMargin = dp(3);
         topPanel.addView(scaleView, scaleParams);
 
@@ -115,7 +113,8 @@ public class MainActivity extends Activity {
         freqText.setText("98.1 MHz");
         freqText.setTextSize(28f);
         freqText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        freqText.setTextColor(Color.parseColor("#E0F2FE"));
+        freqText.setTextColor(Color.parseColor("#F0F9FF"));
+        freqText.setShadowLayer(12f, 0f, 0f, Color.parseColor("#38BDF8"));
         freqText.setGravity(Gravity.CENTER);
         topPanel.addView(freqText);
 
@@ -128,7 +127,7 @@ public class MainActivity extends Activity {
         topPanel.addView(channelNameText);
 
         volumeText = new TextView(this);
-        volumeText.setText("VOLUME: 80%  (Rotate Knob)");
+        volumeText.setText("VOLUME: 80%");
         volumeText.setTextSize(11f);
         volumeText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         volumeText.setTextColor(Color.parseColor("#4ADE80"));
@@ -138,14 +137,15 @@ public class MainActivity extends Activity {
 
         LinearLayout.LayoutParams topParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.30f);
+        topParams.bottomMargin = dp(6);
         root.addView(topPanel, topParams);
 
-        // Middle Rotary Volume Knob with Ambient Light & < > Tuning Buttons
+        // Middle Rotary Volume Knob Stage
         LinearLayout middlePanel = new LinearLayout(this);
         middlePanel.setOrientation(LinearLayout.VERTICAL);
         middlePanel.setGravity(Gravity.CENTER);
         middlePanel.setBackgroundColor(Color.TRANSPARENT);
-        middlePanel.setPadding(12, 4, 12, 4);
+        middlePanel.setPadding(dp(8), dp(2), dp(8), dp(2));
 
         LinearLayout dialRow = new LinearLayout(this);
         dialRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -224,11 +224,11 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.27f);
         root.addView(middlePanel, midParams);
 
-        // Equalizer Section with Small Ambient Color Knobs (Bass / Mid / Treble)
+        // Equalizer Card with Small Ambient Color Knobs
         LinearLayout eqPanel = new LinearLayout(this);
         eqPanel.setOrientation(LinearLayout.VERTICAL);
         eqPanel.setBackground(createGlassCard(Color.parseColor("#B80B1220"), Color.parseColor("#3394A3B8"), dp(16)));
-        eqPanel.setPadding(dp(10), dp(5), dp(10), dp(5));
+        eqPanel.setPadding(dp(10), dp(6), dp(10), dp(4));
 
         LinearLayout eqHeader = new LinearLayout(this);
         eqHeader.setOrientation(LinearLayout.HORIZONTAL);
@@ -317,6 +317,8 @@ public class MainActivity extends Activity {
 
         LinearLayout.LayoutParams eqParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.29f);
+        eqParams.topMargin = dp(4);
+        eqParams.bottomMargin = dp(6);
         root.addView(eqPanel, eqParams);
 
         // Bottom Channel Preset Bar
@@ -336,6 +338,7 @@ public class MainActivity extends Activity {
 
         frameRoot.addView(root, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
         setContentView(frameRoot);
         syncEqKnobsAndLabels("BASS+");
         loadDefaultChannels();
@@ -343,6 +346,14 @@ public class MainActivity extends Activity {
         updateTunerDisplay(-1);
         setAppVolume(volumeLevel, (volumeLevel - 0.5f) * 270f);
         fetchChannelsAsync(false);
+    }
+
+    private GradientDrawable createGlassCard(int fillColor, int strokeColor, int radiusPx) {
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(fillColor);
+        gd.setCornerRadius(radiusPx);
+        gd.setStroke(dp(1), strokeColor);
+        return gd;
     }
 
     private LinearLayout createSmallEqKnobColumn(String title, TunerKnobView knob, TextView valueView) {
@@ -381,7 +392,7 @@ public class MainActivity extends Activity {
         b.setTextSize(9f);
         b.setAllCaps(true);
         b.setTextColor(Color.parseColor("#E2E8F0"));
-        b.setBackgroundColor(Color.parseColor("#182232"));
+        b.setBackground(createGlassCard(Color.parseColor("#1E293B"), Color.parseColor("#475569"), dp(8)));
         b.setMinHeight(0);
         b.setMinimumWidth(0);
         b.setPadding(dp(8), dp(2), dp(8), dp(2));
@@ -479,11 +490,11 @@ public class MainActivity extends Activity {
     private Button createArrowButton(String label) {
         Button b = new Button(this);
         b.setText(label);
-        b.setTextSize(24f);
-        b.setTextColor(Color.parseColor("#CBD5E1"));
-        b.setBackgroundColor(Color.TRANSPARENT);
-        b.setMinimumWidth(dp(44));
-        b.setMinimumHeight(dp(56));
+        b.setTextSize(22f);
+        b.setTextColor(Color.parseColor("#E2E8F0"));
+        b.setBackground(createGlassCard(Color.parseColor("#881E293B"), Color.parseColor("#4438BDF8"), dp(24)));
+        b.setMinimumWidth(dp(46));
+        b.setMinimumHeight(dp(46));
         return b;
     }
 
@@ -492,9 +503,9 @@ public class MainActivity extends Activity {
         b.setText(label);
         b.setTextSize(10f);
         b.setAllCaps(true);
-        b.setTextColor(Color.parseColor("#E2E8F0"));
-        b.setBackgroundColor(Color.parseColor("#18202C"));
-        b.setPadding(dp(12), dp(4), dp(12), dp(4));
+        b.setTextColor(Color.parseColor("#F1F5F9"));
+        b.setBackground(createGlassCard(Color.parseColor("#AA1E293B"), Color.parseColor("#5538BDF8"), dp(10)));
+        b.setPadding(dp(14), dp(4), dp(14), dp(4));
         return b;
     }
 
@@ -558,10 +569,10 @@ public class MainActivity extends Activity {
                 Button btn = (Button) child;
                 if (i == activeIdx) {
                     btn.setTextColor(Color.parseColor("#38BDF8"));
-                    btn.setBackgroundColor(Color.parseColor("#132235"));
+                    btn.setBackground(createGlassCard(Color.parseColor("#CC172A46"), Color.parseColor("#FF38BDF8"), dp(10)));
                 } else {
-                    btn.setTextColor(Color.parseColor("#D1D5DB"));
-                    btn.setBackgroundColor(Color.parseColor("#111620"));
+                    btn.setTextColor(Color.parseColor("#CBD5E1"));
+                    btn.setBackground(createGlassCard(Color.parseColor("#99111827"), Color.parseColor("#3364748B"), dp(10)));
                 }
             }
         }
@@ -734,209 +745,6 @@ public class MainActivity extends Activity {
         stopPlayback();
     }
 
-    private static class TunerScaleView extends View {
-        private float frequency = 98.1f;
-        private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint needlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        TunerScaleView(Context context) {
-            super(context);
-            linePaint.setColor(Color.parseColor("#475569"));
-            linePaint.setStrokeWidth(2f);
-
-            textPaint.setColor(Color.parseColor("#94A3B8"));
-            textPaint.setTextSize(24f);
-            textPaint.setTextAlign(Paint.Align.CENTER);
-
-            needlePaint.setColor(Color.parseColor("#EF4444"));
-            needlePaint.setStrokeWidth(4f);
-        }
-
-        void setFrequency(float freq) {
-            this.frequency = freq;
-            invalidate();
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            float w = getWidth();
-            float h = getHeight();
-            if (w <= 0 || h <= 0) return;
-
-            float minFreq = 88.0f;
-            float maxFreq = 108.0f;
-
-            for (int f = 90; f <= 106; f += 4) {
-                float frac = (f - minFreq) / (maxFreq - minFreq);
-                float x = frac * w;
-                canvas.drawText(String.valueOf(f), x, h * 0.35f, textPaint);
-            }
-
-            float tickTop = h * 0.55f;
-            int totalTicks = 40;
-            for (int i = 0; i <= totalTicks; i++) {
-                float x = (i * w) / totalTicks;
-                float tickLen = (i % 5 == 0) ? h * 0.25f : h * 0.14f;
-                canvas.drawLine(x, tickTop, x, tickTop + tickLen, linePaint);
-            }
-
-            float clamped = Math.max(minFreq, Math.min(maxFreq, frequency));
-            float nx = ((clamped - minFreq) / (maxFreq - minFreq)) * w;
-            canvas.drawLine(nx, h * 0.15f, nx, h * 0.92f, needlePaint);
-        }
-    }
-
-    private static class TunerKnobView extends View {
-        interface OnRotateListener {
-            void onRotateDelta(float deltaDegrees, float knobAngle);
-        }
-
-        private float angle = 0f;
-        private float lastTouchAngle = 0f;
-        private float hue;
-        private final long cycleDurationMs;
-        private ValueAnimator ambientAnimator;
-        private OnRotateListener rotateListener;
-
-        private final Paint ambientGlowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint ambientRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint outerRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint facePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint ledPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        TunerKnobView(Context context, long cycleDurationMs, float initialHue) {
-            super(context);
-            this.cycleDurationMs = cycleDurationMs;
-            this.hue = initialHue % 360f;
-
-            outerRingPaint.setColor(Color.parseColor("#1F2937"));
-            facePaint.setColor(Color.parseColor("#9CA3AF"));
-            ledPaint.setColor(Color.parseColor("#22C55E"));
-
-            ambientRingPaint.setStyle(Paint.Style.STROKE);
-            ambientRingPaint.setStrokeWidth(5.5f);
-
-            startAmbientAnimation();
-        }
-
-        private void startAmbientAnimation() {
-            if (ambientAnimator != null) return;
-            ambientAnimator = ValueAnimator.ofFloat(hue, hue + 360f);
-            ambientAnimator.setDuration(cycleDurationMs);
-            ambientAnimator.setRepeatCount(ValueAnimator.INFINITE);
-            ambientAnimator.setRepeatMode(ValueAnimator.RESTART);
-            ambientAnimator.setInterpolator(new LinearInterpolator());
-            ambientAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-                @Override
-                public void onAnimationUpdate(ValueAnimator animation) {
-                    hue = ((Float) animation.getAnimatedValue()) % 360f;
-                    invalidate();
-                }
-            });
-            ambientAnimator.start();
-        }
-
-        void stopAmbientAnimation() {
-            if (ambientAnimator != null) {
-                ambientAnimator.cancel();
-                ambientAnimator = null;
-            }
-        }
-
-        void setOnRotateListener(OnRotateListener listener) {
-            this.rotateListener = listener;
-        }
-
-        void setAngle(float angle) {
-            this.angle = angle;
-            invalidate();
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent event) {
-            float cx = getWidth() / 2f;
-            float cy = getHeight() / 2f;
-            float dx = event.getX() - cx;
-            float dy = event.getY() - cy;
-            float touchAngle = (float) Math.toDegrees(Math.atan2(dy, dx));
-
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                lastTouchAngle = touchAngle;
-                return true;
-            } else if (event.getAction() == MotionEvent.ACTION_MOVE) {
-                float diff = touchAngle - lastTouchAngle;
-                if (diff > 180f) diff -= 360f;
-                if (diff < -180f) diff += 360f;
-                angle += diff;
-                lastTouchAngle = touchAngle;
-                invalidate();
-                if (rotateListener != null) {
-                    rotateListener.onRotateDelta(diff, angle);
-                }
-                return true;
-            }
-            return super.onTouchEvent(event);
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            float w = getWidth();
-            float h = getHeight();
-            float cx = w / 2f;
-            float cy = h / 2f;
-            float maxR = Math.min(cx, cy);
-            float knobRadius = maxR * 0.78f;
-
-            int primaryColor = Color.HSVToColor(225, new float[]{hue, 0.95f, 1.0f});
-            int secondaryColor = Color.HSVToColor(225, new float[]{(hue + 90f) % 360f, 0.95f, 1.0f});
-            int glowCenter = Color.HSVToColor(120, new float[]{hue, 0.90f, 1.0f});
-            int glowMid = Color.HSVToColor(45, new float[]{(hue + 45f) % 360f, 0.90f, 1.0f});
-
-            ambientGlowPaint.setShader(new RadialGradient(
-                    cx, cy, maxR * 0.98f,
-                    new int[]{glowCenter, glowMid, Color.TRANSPARENT},
-                    new float[]{0.66f, 0.86f, 1.0f},
-                    Shader.TileMode.CLAMP));
-            canvas.drawCircle(cx, cy, maxR * 0.98f, ambientGlowPaint);
-
-            ambientRingPaint.setShader(new LinearGradient(
-                    cx - knobRadius, cy - knobRadius, cx + knobRadius, cy + knobRadius,
-                    primaryColor, secondaryColor, Shader.TileMode.CLAMP));
-            canvas.drawCircle(cx, cy, knobRadius * 1.05f, ambientRingPaint);
-
-            outerRingPaint.setShader(new LinearGradient(
-                    0, 0, w, h,
-                    Color.parseColor("#27272A"),
-                    Color.parseColor("#09090B"),
-                    Shader.TileMode.CLAMP));
-            canvas.drawCircle(cx, cy, knobRadius, outerRingPaint);
-
-            float innerR = knobRadius * 0.74f;
-            facePaint.setShader(new RadialGradient(
-                    cx, cy, innerR,
-                    new int[]{Color.parseColor("#E4E4E7"), Color.parseColor("#71717A"), Color.parseColor("#3F3F46")},
-                    new float[]{0.0f, 0.75f, 1.0f},
-                    Shader.TileMode.CLAMP));
-            canvas.drawCircle(cx, cy, innerR, facePaint);
-
-            canvas.save();
-            canvas.rotate(angle, cx, cy);
-            canvas.drawCircle(cx, cy - innerR * 0.65f, knobRadius * 0.055f, ledPaint);
-            canvas.restore();
-        }
-    }
-
-    private GradientDrawable createGlassCard(int fillColor, int strokeColor, int radiusPx) {
-        GradientDrawable gd = new GradientDrawable();
-        gd.setColor(fillColor);
-        gd.setCornerRadius(radiusPx);
-        gd.setStroke(dp(1), strokeColor);
-        return gd;
-    }
-
     private static class SpectrumBgView extends View {
         private float hue = 200f;
         private ValueAnimator bgAnimator;
@@ -1022,15 +830,15 @@ public class MainActivity extends Activity {
 
         TunerScaleView(Context context) {
             super(context);
-            linePaint.setColor(Color.parseColor("#475569"));
+            linePaint.setColor(Color.parseColor("#64748B"));
             linePaint.setStrokeWidth(2f);
 
-            textPaint.setColor(Color.parseColor("#94A3B8"));
+            textPaint.setColor(Color.parseColor("#CBD5E1"));
             textPaint.setTextSize(24f);
             textPaint.setTextAlign(Paint.Align.CENTER);
 
-            needlePaint.setColor(Color.parseColor("#EF4444"));
-            needlePaint.setStrokeWidth(4f);
+            needlePaint.setColor(Color.parseColor("#F43F5E"));
+            needlePaint.setStrokeWidth(4.5f);
         }
 
         void setFrequency(float freq) {
@@ -1175,7 +983,7 @@ public class MainActivity extends Activity {
             int glowCenter = Color.HSVToColor(120, new float[]{hue, 0.90f, 1.0f});
             int glowMid = Color.HSVToColor(45, new float[]{(hue + 45f) % 360f, 0.90f, 1.0f});
 
-            ambientGlowPaint.setShader(new RadialGradient(
+            ambientGlowPaint.setShader(new android.graphics.RadialGradient(
                     cx, cy, maxR * 0.98f,
                     new int[]{glowCenter, glowMid, Color.TRANSPARENT},
                     new float[]{0.66f, 0.86f, 1.0f},
@@ -1195,7 +1003,7 @@ public class MainActivity extends Activity {
             canvas.drawCircle(cx, cy, knobRadius, outerRingPaint);
 
             float innerR = knobRadius * 0.74f;
-            facePaint.setShader(new RadialGradient(
+            facePaint.setShader(new android.graphics.RadialGradient(
                     cx, cy, innerR,
                     new int[]{Color.parseColor("#E4E4E7"), Color.parseColor("#71717A"), Color.parseColor("#3F3F46")},
                     new float[]{0.0f, 0.75f, 1.0f},
@@ -1206,96 +1014,6 @@ public class MainActivity extends Activity {
             canvas.rotate(angle, cx, cy);
             canvas.drawCircle(cx, cy - innerR * 0.65f, knobRadius * 0.055f, ledPaint);
             canvas.restore();
-        }
-    }
-
-    private GradientDrawable createGlassCard(int fillColor, int strokeColor, int radiusPx) {
-        GradientDrawable gd = new GradientDrawable();
-        gd.setColor(fillColor);
-        gd.setCornerRadius(radiusPx);
-        gd.setStroke(dp(1), strokeColor);
-        return gd;
-    }
-
-    private static class SpectrumBgView extends View {
-        private float hue = 200f;
-        private ValueAnimator bgAnimator;
-        private final Paint basePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint auroraPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        SpectrumBgView(Context context) {
-            super(context);
-            gridPaint.setColor(Color.parseColor("#1438BDF8"));
-            gridPaint.setStrokeWidth(1.2f);
-            dotPaint.setColor(Color.parseColor("#1CE2E8F0"));
-            startAmbientAnimation();
-        }
-
-        private void startAmbientAnimation() {
-            if (bgAnimator != null) return;
-            bgAnimator = ValueAnimator.ofFloat(0f, 360f);
-            bgAnimator.setDuration(14000L);
-            bgAnimator.setRepeatCount(ValueAnimator.INFINITE);
-            bgAnimator.setRepeatMode(ValueAnimator.RESTART);
-            bgAnimator.setInterpolator(new LinearInterpolator());
-            bgAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-                @Override
-                public void onAnimationUpdate(ValueAnimator animation) {
-                    hue = (Float) animation.getAnimatedValue();
-                    invalidate();
-                }
-            });
-            bgAnimator.start();
-        }
-
-        void stopAmbientAnimation() {
-            if (bgAnimator != null) {
-                bgAnimator.cancel();
-                bgAnimator = null;
-            }
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            float w = getWidth();
-            float h = getHeight();
-            if (w <= 0 || h <= 0) return;
-
-            basePaint.setShader(new LinearGradient(
-                    0, 0, 0, h,
-                    new int[]{
-                        Color.parseColor("#040711"),
-                        Color.parseColor("#091326"),
-                        Color.parseColor("#040711")
-                    },
-                    new float[]{0f, 0.5f, 1f},
-                    Shader.TileMode.CLAMP));
-            canvas.drawRect(0, 0, w, h, basePaint);
-
-            int barCount = 28;
-            float gap = 6f;
-            float barWidth = Math.max(4f, (w - (barCount + 1) * gap) / barCount);
-            float phase = (hue / 360f) * (float) (Math.PI * 2.0);
-            float ampScale = isPlaying ? 1.0f : 0.35f;
-
-            for (int i = 0; i < barCount; i++) {
-                float norm = (float) Math.abs(Math.sin(phase + i * 0.42f)) * 0.7f
-                        + (float) Math.abs(Math.cos(phase * 1.4f - i * 0.25f)) * 0.3f;
-                float barH = h * (0.08f + 0.55f * norm * ampScale);
-                float left = gap + i * (barWidth + gap);
-                float top = h * 0.52f - barH * 0.5f;
-                float bottom = h * 0.52f + barH * 0.5f;
-
-                int barColor = Color.HSVToColor(
-                        isPlaying ? 130 : 65,
-                        new float[]{(hue + i * 8f) % 360f, 0.90f, 1.0f});
-                auroraPaint.setShader(null);
-                auroraPaint.setColor(barColor);
-                canvas.drawRoundRect(new RectF(left, top, left + barWidth, bottom), 6f, 6f, auroraPaint);
-            }
         }
     }
 }
