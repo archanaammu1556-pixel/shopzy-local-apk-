@@ -15,6 +15,9 @@ import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.media.audiofx.Equalizer;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.PowerManager;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -69,6 +72,10 @@ public class MainActivity extends Activity {
     private LinearLayout presetLayout;
     private int currentIndex = -1;
     private boolean isPlaying = false;
+    private int retryCount = 0;
+    private static final int MAX_RETRIES = 3;
+    private final Handler retryHandler = new Handler(Looper.getMainLooper());
+    private PowerManager.WakeLock wakeLock;
     private float volumeLevel = 0.8f;
 
     private int bassLevel = 25;
@@ -684,6 +691,8 @@ public class MainActivity extends Activity {
         statusText.setText("Buffering: " + ch.name);
         stopPlayback();
 
+        retryHandler.removeCallbacksAndMessages(null);
+        acquireWakeLock();
         mediaPlayer = new MediaPlayer();
         mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
         try {
@@ -691,6 +700,7 @@ public class MainActivity extends Activity {
             mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                 @Override
                 public void onPrepared(MediaPlayer mp) {
+                    retryCount = 0;
                     initEqualizerForPlayer(mp);
                     applyVolumeToPlayer();
                     mp.start();
@@ -698,25 +708,98 @@ public class MainActivity extends Activity {
                     statusText.setText("Playing: " + ch.name);
                 }
             });
+            mediaPlayer.setOnInfoListener(new MediaPlayer.OnInfoListener() {
+                @Override
+                public boolean onInfo(MediaPlayer mp, int what, int extra) {
+                    if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
+                        statusText.setText("Buffering: " + ch.name + "...");
+                        return true;
+                    } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
+                        statusText.setText("Playing: " + ch.name);
+                        return true;
+                    }
+                    return false;
+                }
+            });
+            mediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+                @Override
+                public void onCompletion(MediaPlayer mp) {
+                    scheduleStreamRetry(index, "Stream ended, reconnecting...");
+                }
+            });
             mediaPlayer.setOnErrorListener(new MediaPlayer.OnErrorListener() {
                 @Override
                 public boolean onError(MediaPlayer mp, int what, int extra) {
-                    statusText.setText("Stream error, refreshing list...");
-                    stopPlayback();
-                    fetchChannelsAsync(false);
+                    scheduleStreamRetry(index, "Stream dropped, reconnecting...");
                     return true;
                 }
             });
             mediaPlayer.prepareAsync();
         } catch (Exception e) {
-            statusText.setText("Error playing " + ch.name + ", refreshing...");
-            stopPlayback();
+            scheduleStreamRetry(index, "Connection error, reconnecting...");
+        }
+    }
+
+    private void scheduleStreamRetry(final int index, final String reason) {
+        releaseEqualizer();
+        if (mediaPlayer != null) {
+            try {
+                mediaPlayer.reset();
+                mediaPlayer.release();
+            } catch (Exception ignored) {
+            }
+            mediaPlayer = null;
+        }
+        isPlaying = false;
+
+        if (retryCount < MAX_RETRIES) {
+            retryCount++;
+            statusText.setText(reason + " (" + retryCount + "/" + MAX_RETRIES + ")");
+            retryHandler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (currentIndex == index && index >= 0 && index < channels.size()) {
+                        playChannel(index);
+                    }
+                }
+            }, 1500L);
+        } else {
+            retryCount = 0;
+            releaseWakeLock();
+            statusText.setText("Stream unstable, refreshing list...");
             fetchChannelsAsync(false);
         }
     }
 
+    private void acquireWakeLock() {
+        try {
+            if (wakeLock == null) {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MalluFM:StreamLock");
+                }
+            }
+            if (wakeLock != null && !wakeLock.isHeld()) {
+                wakeLock.acquire(30 * 60 * 1000L);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void releaseWakeLock() {
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private void stopPlayback() {
+        retryHandler.removeCallbacksAndMessages(null);
+        retryCount = 0;
         isPlaying = false;
+        releaseWakeLock();
         releaseEqualizer();
         if (mediaPlayer != null) {
             try {
