@@ -52,7 +52,7 @@ public class MainActivity extends Activity {
     private final List<Channel> channels = new ArrayList<>();
     private MediaPlayer mediaPlayer;
     private Equalizer equalizer;
-    private CarbonBgView bgView;
+    private SpectrumBgView bgView;
     private TunerScaleView scaleView;
     private TunerKnobView knobView;
     private TunerKnobView bassKnob;
@@ -81,7 +81,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
 
         FrameLayout frameRoot = new FrameLayout(this);
-        bgView = new CarbonBgView(this);
+        bgView = new SpectrumBgView(this);
         frameRoot.addView(bgView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
@@ -936,7 +936,7 @@ public class MainActivity extends Activity {
         return gd;
     }
 
-    private static class CarbonBgView extends View {
+    private static class SpectrumBgView extends View {
         private float hue = 200f;
         private ValueAnimator bgAnimator;
         private final Paint basePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -944,7 +944,7 @@ public class MainActivity extends Activity {
         private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        CarbonBgView(Context context) {
+        SpectrumBgView(Context context) {
             super(context);
             gridPaint.setColor(Color.parseColor("#1438BDF8"));
             gridPaint.setStrokeWidth(1.2f);
@@ -984,34 +984,36 @@ public class MainActivity extends Activity {
             if (w <= 0 || h <= 0) return;
 
             basePaint.setShader(new LinearGradient(
-                    0, 0, w, h,
+                    0, 0, 0, h,
                     new int[]{
-                        Color.parseColor("#060B19"),
-                        Color.parseColor("#0F2238"),
-                        Color.parseColor("#070D1A")
+                        Color.parseColor("#040711"),
+                        Color.parseColor("#091326"),
+                        Color.parseColor("#040711")
                     },
                     new float[]{0f, 0.5f, 1f},
                     Shader.TileMode.CLAMP));
             canvas.drawRect(0, 0, w, h, basePaint);
 
-            int glow1 = Color.HSVToColor(58, new float[]{hue, 0.85f, 0.95f});
-            int glow2 = Color.HSVToColor(28, new float[]{(hue + 75f) % 360f, 0.85f, 0.90f});
-            auroraPaint.setShader(new RadialGradient(
-                    w * 0.5f, h * 0.45f, Math.max(w, h) * 0.65f,
-                    new int[]{glow1, glow2, Color.TRANSPARENT},
-                    new float[]{0f, 0.55f, 1f},
-                    Shader.TileMode.CLAMP));
-            canvas.drawRect(0, 0, w, h, auroraPaint);
+            int barCount = 28;
+            float gap = 6f;
+            float barWidth = Math.max(4f, (w - (barCount + 1) * gap) / barCount);
+            float phase = (hue / 360f) * (float) (Math.PI * 2.0);
+            float ampScale = isPlaying ? 1.0f : 0.35f;
 
-            float step = 28f;
-            for (float x = 0; x < w; x += step) {
-                canvas.drawLine(x, 0, x, h, gridPaint);
-            }
-            for (float y = 0; y < h; y += step) {
-                canvas.drawLine(0, y, w, y, gridPaint);
-                for (float x = (y % (step * 2) == 0 ? 0 : step / 2f); x < w; x += step) {
-                    canvas.drawCircle(x, y, 1.5f, dotPaint);
-                }
+            for (int i = 0; i < barCount; i++) {
+                float norm = (float) Math.abs(Math.sin(phase + i * 0.42f)) * 0.7f
+                        + (float) Math.abs(Math.cos(phase * 1.4f - i * 0.25f)) * 0.3f;
+                float barH = h * (0.08f + 0.55f * norm * ampScale);
+                float left = gap + i * (barWidth + gap);
+                float top = h * 0.52f - barH * 0.5f;
+                float bottom = h * 0.52f + barH * 0.5f;
+
+                int barColor = Color.HSVToColor(
+                        isPlaying ? 130 : 65,
+                        new float[]{(hue + i * 8f) % 360f, 0.90f, 1.0f});
+                auroraPaint.setShader(null);
+                auroraPaint.setColor(barColor);
+                canvas.drawRoundRect(new RectF(left, top, left + barWidth, bottom), 6f, 6f, auroraPaint);
             }
         }
     }
