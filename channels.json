@@ -15,6 +15,22 @@
     {
       "name": "Kancheeravam Radio",
       "url": "https://radiosavre.com:8020/radio.mp3"
+    },
+    {
+      "name": "Mazhavil FM",
+      "url": "https://stream.zeno.fm/6x4d2t3m8k8uv"
+    },
+    {
+      "name": "Malayalam Evergreen Hits",
+      "url": "https://stream.zeno.fm/4g2x3v9p7c8uv"
+    },
+    {
+      "name": "Old is Gold Malayalam",
+      "url": "https://stream.zeno.fm/8m5k2n7r6h8uv"
+    },
+    {
+      "name": "Malayalam Melody Radio",
+      "url": "https://stream.zeno.fm/2p9w4t6y5j8uv"
     }
   ]
 }
