@@ -2,6 +2,12 @@ package com.mallufm.radio;
 
 import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Intent;
+import android.os.Build;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -75,6 +81,9 @@ public class MainActivity extends Activity {
     private boolean isPlaying = false;
     private int retryCount = 0;
     private static final int MAX_RETRIES = 3;
+    private static final String NOTIF_CHANNEL_ID = "mallu_fm_playback_channel";
+    private static final int NOTIF_ID = 1001;
+
     private final Handler retryHandler = new Handler(Looper.getMainLooper());
     private PowerManager.WakeLock wakeLock;
     private float volumeLevel = 0.8f;
@@ -451,6 +460,7 @@ public class MainActivity extends Activity {
     }
 
     private void initEqualizerForPlayer(MediaPlayer mp) {
+        hidePlaybackNotification();
         releaseEqualizer();
         if (mp == null) return;
         try {
@@ -616,6 +626,64 @@ public class MainActivity extends Activity {
         return super.onKeyDown(keyCode, event);
     }
 
+    private void ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null && nm.getNotificationChannel(NOTIF_CHANNEL_ID) == null) {
+                NotificationChannel channel = new NotificationChannel(
+                        NOTIF_CHANNEL_ID,
+                        "Mallu FM Playback",
+                        NotificationManager.IMPORTANCE_LOW
+                );
+                channel.setDescription("Shows active Malayalam FM stream in notification bar");
+                nm.createNotificationChannel(channel);
+            }
+        }
+    }
+
+    private void showPlaybackNotification(String title, String content) {
+        try {
+            ensureNotificationChannel();
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+
+            Intent openIntent = new Intent(this, MainActivity.class);
+            openIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                piFlags |= PendingIntent.FLAG_IMMUTABLE;
+            }
+            PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, openIntent, piFlags);
+
+            Notification.Builder builder = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    ? new Notification.Builder(this, NOTIF_CHANNEL_ID)
+                    : new Notification.Builder(this);
+
+            builder.setSmallIcon(android.R.drawable.ic_media_play)
+                    .setContentTitle(title)
+                    .setContentText(content)
+                    .setContentIntent(pendingIntent)
+                    .setOngoing(true);
+
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                builder.setPriority(Notification.PRIORITY_LOW);
+            }
+
+            nm.notify(NOTIF_ID, builder.build());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void hidePlaybackNotification() {
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) {
+                nm.cancel(NOTIF_ID);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private void tuneStep(int delta) {
         if (channels.isEmpty()) return;
         int base = currentIndex >= 0 ? currentIndex : 0;
@@ -776,6 +844,7 @@ public class MainActivity extends Activity {
                     mp.start();
                     isPlaying = true;
                     statusText.setText("Playing: " + ch.name);
+                    showPlaybackNotification("Mallu FM • " + ch.name, String.format("%.1f MHz • Playing in background", ch.freq));
                 }
             });
             mediaPlayer.setOnInfoListener(new MediaPlayer.OnInfoListener() {
