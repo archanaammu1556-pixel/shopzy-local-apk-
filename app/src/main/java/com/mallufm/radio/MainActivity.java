@@ -6,7 +6,10 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Build;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -83,6 +86,29 @@ public class MainActivity extends Activity {
     private static final int MAX_RETRIES = 3;
     private static final String NOTIF_CHANNEL_ID = "mallu_fm_playback_channel";
     private static final int NOTIF_ID = 1001;
+    private static final String ACTION_TOGGLE_PLAY = "com.mallufm.radio.ACTION_TOGGLE_PLAY";
+    private static final String ACTION_NEXT_CHANNEL = "com.mallufm.radio.ACTION_NEXT_CHANNEL";
+    private boolean playbackReceiverRegistered = false;
+
+    private final BroadcastReceiver playbackActionReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null || intent.getAction() == null) return;
+            String act = intent.getAction();
+            if (ACTION_TOGGLE_PLAY.equals(act)) {
+                if (isPlaying) {
+                    stopPlayback();
+                } else if (currentIndex >= 0 && currentIndex < channels.size()) {
+                    playChannel(currentIndex);
+                } else if (!channels.isEmpty()) {
+                    playChannel(0);
+                }
+            } else if (ACTION_NEXT_CHANNEL.equals(act)) {
+                tuneStep(1);
+            }
+        }
+    };
+
 
     private final Handler retryHandler = new Handler(Looper.getMainLooper());
     private PowerManager.WakeLock wakeLock;
@@ -626,6 +652,31 @@ public class MainActivity extends Activity {
         return super.onKeyDown(keyCode, event);
     }
 
+    private void registerPlaybackActionsReceiver() {
+        if (playbackReceiverRegistered) return;
+        try {
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(ACTION_TOGGLE_PLAY);
+            filter.addAction(ACTION_NEXT_CHANNEL);
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(playbackActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(playbackActionReceiver, filter);
+            }
+            playbackReceiverRegistered = true;
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void unregisterPlaybackActionsReceiver() {
+        if (!playbackReceiverRegistered) return;
+        try {
+            unregisterReceiver(playbackActionReceiver);
+            playbackReceiverRegistered = false;
+        } catch (Exception ignored) {
+        }
+    }
+
     private void ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
@@ -655,14 +706,34 @@ public class MainActivity extends Activity {
             }
             PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, openIntent, piFlags);
 
+            registerPlaybackActionsReceiver();
+
+            int mutableFlag = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                mutableFlag |= PendingIntent.FLAG_IMMUTABLE;
+            }
+
+            Intent toggleIntent = new Intent(ACTION_TOGGLE_PLAY);
+            toggleIntent.setPackage(getPackageName());
+            PendingIntent togglePi = PendingIntent.getBroadcast(this, 1, toggleIntent, mutableFlag);
+
+            Intent nextIntent = new Intent(ACTION_NEXT_CHANNEL);
+            nextIntent.setPackage(getPackageName());
+            PendingIntent nextPi = PendingIntent.getBroadcast(this, 2, nextIntent, mutableFlag);
+
             Notification.Builder builder = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                     ? new Notification.Builder(this, NOTIF_CHANNEL_ID)
                     : new Notification.Builder(this);
+
+            String toggleLabel = isPlaying ? "Pause / Stop" : "Play";
+            int toggleIcon = isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play;
 
             builder.setSmallIcon(android.R.drawable.ic_media_play)
                     .setContentTitle(title)
                     .setContentText(content)
                     .setContentIntent(pendingIntent)
+                    .addAction(toggleIcon, toggleLabel, togglePi)
+                    .addAction(android.R.drawable.ic_media_next, "Next", nextPi)
                     .setOngoing(true);
 
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -958,6 +1029,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        unregisterPlaybackActionsReceiver();
         super.onDestroy();
         if (bgView != null) bgView.stopAmbientAnimation();
         if (knobView != null) knobView.stopAmbientAnimation();
