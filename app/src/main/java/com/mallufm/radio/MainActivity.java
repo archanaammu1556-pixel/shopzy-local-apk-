@@ -12,6 +12,7 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.media.audiofx.Equalizer;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -20,6 +21,7 @@ import android.view.animation.LinearInterpolator;
 import android.widget.Button;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -48,16 +50,26 @@ public class MainActivity extends Activity {
 
     private final List<Channel> channels = new ArrayList<>();
     private MediaPlayer mediaPlayer;
+    private Equalizer equalizer;
     private TunerScaleView scaleView;
     private TunerKnobView knobView;
     private TextView freqText;
     private TextView channelNameText;
     private TextView statusText;
     private TextView volumeText;
+    private TextView eqStatusText;
+    private SeekBar bassSeek;
+    private SeekBar midSeek;
+    private SeekBar trebleSeek;
     private LinearLayout presetLayout;
     private int currentIndex = -1;
     private boolean isPlaying = false;
     private float volumeLevel = 0.8f;
+
+    // Normalized -100 to +100 EQ controls
+    private int bassLevel = 25;
+    private int midLevel = 0;
+    private int trebleLevel = 15;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,50 +84,48 @@ public class MainActivity extends Activity {
         LinearLayout topPanel = new LinearLayout(this);
         topPanel.setOrientation(LinearLayout.VERTICAL);
         topPanel.setBackgroundColor(Color.parseColor("#08131E"));
-        topPanel.setPadding(16, 24, 16, 16);
+        topPanel.setPadding(16, 16, 16, 10);
 
         statusText = new TextView(this);
         statusText.setText("Loading Malayalam FM...");
-        statusText.setTextSize(12f);
+        statusText.setTextSize(11f);
         statusText.setTextColor(Color.parseColor("#7DD3FC"));
         statusText.setGravity(Gravity.CENTER);
         topPanel.addView(statusText);
 
         scaleView = new TunerScaleView(this);
         LinearLayout.LayoutParams scaleParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(60));
-        scaleParams.topMargin = dp(6);
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        scaleParams.topMargin = dp(4);
         topPanel.addView(scaleView, scaleParams);
 
         freqText = new TextView(this);
         freqText.setText("98.1 MHz");
-        freqText.setTextSize(36f);
+        freqText.setTextSize(30f);
         freqText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         freqText.setTextColor(Color.parseColor("#E0F2FE"));
         freqText.setGravity(Gravity.CENTER);
-        freqText.setPadding(0, dp(2), 0, 0);
         topPanel.addView(freqText);
 
         channelNameText = new TextView(this);
         channelNameText.setText("Mallu FM");
-        channelNameText.setTextSize(16f);
+        channelNameText.setTextSize(14f);
         channelNameText.setTypeface(Typeface.DEFAULT_BOLD);
         channelNameText.setTextColor(Color.parseColor("#38BDF8"));
         channelNameText.setGravity(Gravity.CENTER);
-        channelNameText.setPadding(0, dp(2), 0, 0);
         topPanel.addView(channelNameText);
 
         volumeText = new TextView(this);
         volumeText.setText("VOLUME: 80%  (Rotate Knob)");
-        volumeText.setTextSize(12f);
+        volumeText.setTextSize(11f);
         volumeText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         volumeText.setTextColor(Color.parseColor("#4ADE80"));
         volumeText.setGravity(Gravity.CENTER);
-        volumeText.setPadding(0, dp(4), 0, 0);
+        volumeText.setPadding(0, dp(2), 0, 0);
         topPanel.addView(volumeText);
 
         LinearLayout.LayoutParams topParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.46f);
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.34f);
         root.addView(topPanel, topParams);
 
         // Middle Rotary Volume Knob with Ambient Light & < > Tuning Buttons
@@ -123,7 +133,7 @@ public class MainActivity extends Activity {
         middlePanel.setOrientation(LinearLayout.VERTICAL);
         middlePanel.setGravity(Gravity.CENTER);
         middlePanel.setBackgroundColor(Color.parseColor("#040609"));
-        middlePanel.setPadding(16, 10, 16, 10);
+        middlePanel.setPadding(12, 6, 12, 6);
 
         LinearLayout dialRow = new LinearLayout(this);
         dialRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -139,9 +149,9 @@ public class MainActivity extends Activity {
         dialRow.addView(prevBtn);
 
         knobView = new TunerKnobView(this);
-        LinearLayout.LayoutParams knobParams = new LinearLayout.LayoutParams(dp(205), dp(205));
-        knobParams.leftMargin = dp(14);
-        knobParams.rightMargin = dp(14);
+        LinearLayout.LayoutParams knobParams = new LinearLayout.LayoutParams(dp(160), dp(160));
+        knobParams.leftMargin = dp(12);
+        knobParams.rightMargin = dp(12);
         knobView.setOnRotateListener(new TunerKnobView.OnRotateListener() {
             @Override
             public void onRotateDelta(float deltaDegrees, float knobAngle) {
@@ -162,11 +172,10 @@ public class MainActivity extends Activity {
 
         middlePanel.addView(dialRow);
 
-        // Compact Play/Stop & Refresh row below knob
         LinearLayout actionRow = new LinearLayout(this);
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
         actionRow.setGravity(Gravity.CENTER);
-        actionRow.setPadding(0, dp(8), 0, 0);
+        actionRow.setPadding(0, dp(4), 0, 0);
 
         Button playPauseBtn = createActionButton("PLAY / STOP");
         playPauseBtn.setOnClickListener(new View.OnClickListener() {
@@ -185,7 +194,7 @@ public class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        playLp.rightMargin = dp(12);
+        playLp.rightMargin = dp(10);
         actionRow.addView(playPauseBtn, playLp);
 
         Button refreshBtn = createActionButton("REFRESH");
@@ -200,10 +209,101 @@ public class MainActivity extends Activity {
         middlePanel.addView(actionRow);
 
         LinearLayout.LayoutParams midParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.40f);
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.30f);
         root.addView(middlePanel, midParams);
 
-        // Bottom Preset Bar
+        // Equalizer Section (Bass / Mid / Treble + Quick EQ Presets)
+        LinearLayout eqPanel = new LinearLayout(this);
+        eqPanel.setOrientation(LinearLayout.VERTICAL);
+        eqPanel.setBackgroundColor(Color.parseColor("#070C14"));
+        eqPanel.setPadding(dp(12), dp(6), dp(12), dp(6));
+
+        LinearLayout eqHeader = new LinearLayout(this);
+        eqHeader.setOrientation(LinearLayout.HORIZONTAL);
+        eqHeader.setGravity(Gravity.CENTER_VERTICAL);
+
+        eqStatusText = new TextView(this);
+        eqStatusText.setText("EQ: CUSTOM");
+        eqStatusText.setTextSize(10f);
+        eqStatusText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        eqStatusText.setTextColor(Color.parseColor("#FBBF24"));
+        LinearLayout.LayoutParams hdrLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        eqHeader.addView(eqStatusText, hdrLp);
+
+        Button flatBtn = createEqPresetButton("FLAT");
+        flatBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                applyEqPreset(0, 0, 0, "FLAT");
+            }
+        });
+        eqHeader.addView(flatBtn);
+
+        Button bassBoostBtn = createEqPresetButton("BASS+");
+        bassBoostBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                applyEqPreset(75, 5, 20, "BASS+");
+            }
+        });
+        eqHeader.addView(bassBoostBtn);
+
+        Button vocalBtn = createEqPresetButton("VOCAL");
+        vocalBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                applyEqPreset(-10, 60, 35, "VOCAL");
+            }
+        });
+        eqHeader.addView(vocalBtn);
+
+        eqPanel.addView(eqHeader);
+
+        bassSeek = new SeekBar(this);
+        bassSeek.setMax(200);
+        eqPanel.addView(createBandRow("BASS", bassSeek, new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                bassLevel = progress - 100;
+                if (fromUser) updateEqLabel("CUSTOM");
+                applyEqualizerSettings();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        }));
+
+        midSeek = new SeekBar(this);
+        midSeek.setMax(200);
+        eqPanel.addView(createBandRow("MID", midSeek, new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                midLevel = progress - 100;
+                if (fromUser) updateEqLabel("CUSTOM");
+                applyEqualizerSettings();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        }));
+
+        trebleSeek = new SeekBar(this);
+        trebleSeek.setMax(200);
+        eqPanel.addView(createBandRow("TREBLE", trebleSeek, new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                trebleLevel = progress - 100;
+                if (fromUser) updateEqLabel("CUSTOM");
+                applyEqualizerSettings();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        }));
+
+        LinearLayout.LayoutParams eqParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.22f);
+        root.addView(eqPanel, eqParams);
+
+        // Bottom Channel Preset Bar
         HorizontalScrollView presetScroll = new HorizontalScrollView(this);
         presetScroll.setBackgroundColor(Color.parseColor("#0B0E14"));
         presetScroll.setFillViewport(true);
@@ -211,7 +311,7 @@ public class MainActivity extends Activity {
         presetLayout = new LinearLayout(this);
         presetLayout.setOrientation(LinearLayout.HORIZONTAL);
         presetLayout.setGravity(Gravity.CENTER_VERTICAL);
-        presetLayout.setPadding(dp(8), dp(8), dp(8), dp(8));
+        presetLayout.setPadding(dp(8), dp(6), dp(8), dp(6));
         presetScroll.addView(presetLayout);
 
         LinearLayout.LayoutParams botParams = new LinearLayout.LayoutParams(
@@ -219,11 +319,130 @@ public class MainActivity extends Activity {
         root.addView(presetScroll, botParams);
 
         setContentView(root);
+        syncSeekBarsFromState();
+        updateEqLabel("BASS+");
         loadDefaultChannels();
         renderChannelButtons();
         updateTunerDisplay(-1);
         setAppVolume(volumeLevel, (volumeLevel - 0.5f) * 270f);
         fetchChannelsAsync(false);
+    }
+
+    private LinearLayout createBandRow(String title, SeekBar bar, SeekBar.OnSeekBarChangeListener listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(1), 0, dp(1));
+
+        TextView label = new TextView(this);
+        label.setText(title);
+        label.setTextSize(10f);
+        label.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        label.setTextColor(Color.parseColor("#CBD5E1"));
+        label.setWidth(dp(50));
+        row.addView(label);
+
+        bar.setOnSeekBarChangeListener(listener);
+        LinearLayout.LayoutParams sbLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        row.addView(bar, sbLp);
+        return row;
+    }
+
+    private Button createEqPresetButton(String label) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setTextSize(9f);
+        b.setAllCaps(true);
+        b.setTextColor(Color.parseColor("#E2E8F0"));
+        b.setBackgroundColor(Color.parseColor("#182232"));
+        b.setMinHeight(0);
+        b.setMinimumWidth(0);
+        b.setPadding(dp(8), dp(2), dp(8), dp(2));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = dp(4);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    private void applyEqPreset(int bass, int mid, int treble, String modeName) {
+        bassLevel = bass;
+        midLevel = mid;
+        trebleLevel = treble;
+        syncSeekBarsFromState();
+        updateEqLabel(modeName);
+        applyEqualizerSettings();
+    }
+
+    private void syncSeekBarsFromState() {
+        if (bassSeek != null) bassSeek.setProgress(bassLevel + 100);
+        if (midSeek != null) midSeek.setProgress(midLevel + 100);
+        if (trebleSeek != null) trebleSeek.setProgress(trebleLevel + 100);
+    }
+
+    private void updateEqLabel(String modeName) {
+        if (eqStatusText != null) {
+            eqStatusText.setText("EQ " + modeName + " | B:" + bassLevel + " M:" + midLevel + " T:" + trebleLevel);
+        }
+    }
+
+    private void initEqualizerForPlayer(MediaPlayer mp) {
+        releaseEqualizer();
+        if (mp == null) return;
+        try {
+            equalizer = new Equalizer(0, mp.getAudioSessionId());
+            equalizer.setEnabled(true);
+            applyEqualizerSettings();
+        } catch (Exception ignored) {
+            equalizer = null;
+        }
+    }
+
+    private void applyEqualizerSettings() {
+        if (equalizer == null) return;
+        try {
+            short bands = equalizer.getNumberOfBands();
+            short[] range = equalizer.getBandLevelRange();
+            if (bands <= 0 || range == null || range.length < 2) return;
+            int minLevel = range[0];
+            int maxLevel = range[1];
+
+            for (short b = 0; b < bands; b++) {
+                float pos;
+                if (bands == 1) {
+                    pos = bassLevel / 100f;
+                } else {
+                    float ratio = (float) b / (float) (bands - 1);
+                    if (ratio < 0.35f) {
+                        pos = bassLevel / 100f;
+                    } else if (ratio <= 0.70f) {
+                        pos = midLevel / 100f;
+                    } else {
+                        pos = trebleLevel / 100f;
+                    }
+                }
+                pos = Math.max(-1f, Math.min(1f, pos));
+                short targetLevel;
+                if (pos >= 0f) {
+                    targetLevel = (short) Math.round(pos * maxLevel);
+                } else {
+                    targetLevel = (short) Math.round((-pos) * minLevel);
+                }
+                equalizer.setBandLevel(b, targetLevel);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void releaseEqualizer() {
+        if (equalizer != null) {
+            try {
+                equalizer.release();
+            } catch (Exception ignored) {
+            }
+            equalizer = null;
+        }
     }
 
     private int dp(int value) {
@@ -233,22 +452,22 @@ public class MainActivity extends Activity {
     private Button createArrowButton(String label) {
         Button b = new Button(this);
         b.setText(label);
-        b.setTextSize(26f);
+        b.setTextSize(24f);
         b.setTextColor(Color.parseColor("#CBD5E1"));
         b.setBackgroundColor(Color.TRANSPARENT);
-        b.setMinimumWidth(dp(48));
-        b.setMinimumHeight(dp(64));
+        b.setMinimumWidth(dp(44));
+        b.setMinimumHeight(dp(56));
         return b;
     }
 
     private Button createActionButton(String label) {
         Button b = new Button(this);
         b.setText(label);
-        b.setTextSize(11f);
+        b.setTextSize(10f);
         b.setAllCaps(true);
         b.setTextColor(Color.parseColor("#E2E8F0"));
         b.setBackgroundColor(Color.parseColor("#18202C"));
-        b.setPadding(dp(14), dp(6), dp(14), dp(6));
+        b.setPadding(dp(12), dp(5), dp(12), dp(5));
         return b;
     }
 
@@ -401,10 +620,10 @@ public class MainActivity extends Activity {
             Channel ch = channels.get(i);
             Button btn = new Button(this);
             btn.setText(String.format("%.1f\n%s", ch.freq, ch.name));
-            btn.setTextSize(11f);
+            btn.setTextSize(10f);
             btn.setAllCaps(false);
             btn.setGravity(Gravity.CENTER);
-            btn.setPadding(dp(14), dp(4), dp(14), dp(4));
+            btn.setPadding(dp(12), dp(3), dp(12), dp(3));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT);
             lp.rightMargin = dp(8);
@@ -434,6 +653,7 @@ public class MainActivity extends Activity {
             mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                 @Override
                 public void onPrepared(MediaPlayer mp) {
+                    initEqualizerForPlayer(mp);
                     applyVolumeToPlayer();
                     mp.start();
                     isPlaying = true;
@@ -459,6 +679,7 @@ public class MainActivity extends Activity {
 
     private void stopPlayback() {
         isPlaying = false;
+        releaseEqualizer();
         if (mediaPlayer != null) {
             try {
                 if (mediaPlayer.isPlaying()) {
@@ -496,7 +717,7 @@ public class MainActivity extends Activity {
             linePaint.setStrokeWidth(2f);
 
             textPaint.setColor(Color.parseColor("#94A3B8"));
-            textPaint.setTextSize(28f);
+            textPaint.setTextSize(24f);
             textPaint.setTextAlign(Paint.Align.CENTER);
 
             needlePaint.setColor(Color.parseColor("#EF4444"));
@@ -641,7 +862,6 @@ public class MainActivity extends Activity {
             int glowCenter = Color.HSVToColor(115, new float[]{hue, 0.90f, 1.0f});
             int glowMid = Color.HSVToColor(45, new float[]{(hue + 45f) % 360f, 0.90f, 1.0f});
 
-            // Soft outer ambient halo
             ambientGlowPaint.setShader(new RadialGradient(
                     cx, cy, maxR * 0.98f,
                     new int[]{glowCenter, glowMid, Color.TRANSPARENT},
@@ -649,13 +869,11 @@ public class MainActivity extends Activity {
                     Shader.TileMode.CLAMP));
             canvas.drawCircle(cx, cy, maxR * 0.98f, ambientGlowPaint);
 
-            // Crisp ambient light ring around the knob
             ambientRingPaint.setShader(new LinearGradient(
                     cx - knobRadius, cy - knobRadius, cx + knobRadius, cy + knobRadius,
                     primaryColor, secondaryColor, Shader.TileMode.CLAMP));
             canvas.drawCircle(cx, cy, knobRadius * 1.05f, ambientRingPaint);
 
-            // Outer dark metallic bezel
             outerRingPaint.setShader(new LinearGradient(
                     0, 0, w, h,
                     Color.parseColor("#27272A"),
@@ -663,7 +881,6 @@ public class MainActivity extends Activity {
                     Shader.TileMode.CLAMP));
             canvas.drawCircle(cx, cy, knobRadius, outerRingPaint);
 
-            // Inner metallic knob face
             float innerR = knobRadius * 0.74f;
             facePaint.setShader(new RadialGradient(
                     cx, cy, innerR,
@@ -672,7 +889,6 @@ public class MainActivity extends Activity {
                     Shader.TileMode.CLAMP));
             canvas.drawCircle(cx, cy, innerR, facePaint);
 
-            // Rotating green position indicator dot
             canvas.save();
             canvas.rotate(angle, cx, cy);
             canvas.drawCircle(cx, cy - innerR * 0.65f, knobRadius * 0.05f, ledPaint);
