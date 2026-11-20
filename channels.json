@@ -1,12 +1,20 @@
 {
   "channels": [
     {
-      "name": "Mallu FM - Channel 1",
-      "url": "https://stream.live.vc.bbcmedia.co.uk/bbc_world_service"
+      "name": "Ahalia FM",
+      "url": "https://cast1.my-control-panel.com/proxy/ahaliafm/stream"
     },
     {
-      "name": "Mallu FM - Channel 2",
-      "url": "https://ice1.somafm.com/groovesalad-128-mp3"
+      "name": "Radio Digital Malayali",
+      "url": "https://radio.digitalmalayali.in/listen/stream/radio.mp3"
+    },
+    {
+      "name": "Radio Suno 87.6 FM",
+      "url": "https://osrnstream.olivesuno.com/suno876.mp3"
+    },
+    {
+      "name": "Kancheeravam Radio",
+      "url": "https://radiosavre.com:8020/radio.mp3"
     }
   ]
 }
