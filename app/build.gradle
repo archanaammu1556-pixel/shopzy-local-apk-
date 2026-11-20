@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.shopzy.app'
+    namespace 'com.mallufm.radio'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.shopzy.app"
+        applicationId "com.mallufm.radio"
         minSdk 21
         targetSdk 34
         versionCode 1
