@@ -1,6 +1,7 @@
 package com.mallufm.radio;
 
 import android.animation.ValueAnimator;
+import android.Manifest;
 import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -677,6 +678,17 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void requestNotifPermissionIfNeeded() {
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 2001);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private void ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
@@ -694,6 +706,7 @@ public class MainActivity extends Activity {
 
     private void showPlaybackNotification(String title, String content) {
         try {
+            requestNotifPermissionIfNeeded();
             ensureNotificationChannel();
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
