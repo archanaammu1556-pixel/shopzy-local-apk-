@@ -111,6 +111,22 @@ public class MainActivity extends Activity {
         topPanel.addView(statusText);
 
         scaleView = new TunerScaleView(this);
+        scaleView.setOnTuneListener(new TunerScaleView.OnTuneListener() {
+            @Override
+            public void onTuneFrequency(float targetFreq, boolean commitPlay) {
+                float rounded = Math.round(targetFreq * 10f) / 10f;
+                freqText.setText(String.format("%.1f MHz", rounded));
+                int bestIdx = findNearestChannelIndex(rounded);
+                if (bestIdx >= 0 && bestIdx < channels.size()) {
+                    Channel bestCh = channels.get(bestIdx);
+                    channelNameText.setText(bestCh.name);
+                    highlightPresets(bestIdx);
+                    if (commitPlay) {
+                        playChannel(bestIdx);
+                    }
+                }
+            }
+        });
         LinearLayout.LayoutParams scaleParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
         scaleParams.topMargin = dp(3);
@@ -546,6 +562,20 @@ public class MainActivity extends Activity {
         return Math.round(raw * 10f) / 10f;
     }
 
+    private int findNearestChannelIndex(float targetFreq) {
+        if (channels.isEmpty()) return -1;
+        int bestIdx = 0;
+        float bestDiff = Math.abs(channels.get(0).freq - targetFreq);
+        for (int i = 1; i < channels.size(); i++) {
+            float diff = Math.abs(channels.get(i).freq - targetFreq);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                bestIdx = i;
+            }
+        }
+        return bestIdx;
+    }
+
     private void tuneStep(int delta) {
         if (channels.isEmpty()) return;
         int base = currentIndex >= 0 ? currentIndex : 0;
@@ -906,7 +936,12 @@ public class MainActivity extends Activity {
     }
 
     private static class TunerScaleView extends View {
+        interface OnTuneListener {
+            void onTuneFrequency(float targetFreq, boolean commitPlay);
+        }
+
         private float frequency = 98.1f;
+        private OnTuneListener tuneListener;
         private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint needlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -921,12 +956,40 @@ public class MainActivity extends Activity {
             textPaint.setTextAlign(Paint.Align.CENTER);
 
             needlePaint.setColor(Color.parseColor("#F43F5E"));
-            needlePaint.setStrokeWidth(4.5f);
+            needlePaint.setStrokeWidth(5.5f);
+        }
+
+        void setOnTuneListener(OnTuneListener listener) {
+            this.tuneListener = listener;
         }
 
         void setFrequency(float freq) {
             this.frequency = freq;
             invalidate();
+        }
+
+        private float xToFrequency(float x) {
+            int w = getWidth();
+            if (w <= 0) return frequency;
+            float minFreq = 88.0f;
+            float maxFreq = 108.0f;
+            float frac = Math.max(0f, Math.min(1f, x / (float) w));
+            return minFreq + frac * (maxFreq - minFreq);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) {
+                float nextFreq = xToFrequency(event.getX());
+                this.frequency = nextFreq;
+                invalidate();
+                if (tuneListener != null) {
+                    tuneListener.onTuneFrequency(nextFreq, action == MotionEvent.ACTION_UP);
+                }
+                return true;
+            }
+            return super.onTouchEvent(event);
         }
 
         @Override
@@ -955,7 +1018,7 @@ public class MainActivity extends Activity {
 
             float clamped = Math.max(minFreq, Math.min(maxFreq, frequency));
             float nx = ((clamped - minFreq) / (maxFreq - minFreq)) * w;
-            canvas.drawLine(nx, h * 0.15f, nx, h * 0.92f, needlePaint);
+            canvas.drawLine(nx, h * 0.12f, nx, h * 0.95f, needlePaint);
         }
     }
 
