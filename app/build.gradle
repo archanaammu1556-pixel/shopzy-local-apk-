@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace 'com.mallufm.codstudiov2'
+    namespace "com.mallufm.codstudiov2"
     compileSdk 34
 
     defaultConfig {
