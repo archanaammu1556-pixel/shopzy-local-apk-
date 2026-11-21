@@ -62,43 +62,73 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     public void onInit(int status) {
         if (status == TextToSpeech.SUCCESS) {
             ttsReady = true;
-            applyVoiceLanguage();
-        } else if (statusText != null) {
-            statusText.setText("Voice engine unavailable");
+            applyVoiceLanguage(false);
+            if (statusText != null) {
+                statusText.setText("TTS Ready • Tap Speak");
+            }
+        } else {
+            ttsReady = false;
+            if (statusText != null) {
+                statusText.setText("TTS Init failed (" + status + ") - Check Android TTS settings");
+            }
         }
     }
 
-    private void applyVoiceLanguage() {
+    private void applyVoiceLanguage(boolean speakNotice) {
         if (!ttsReady || tts == null) return;
         try {
-            Locale target = useMalayalam ? new Locale("ml", "IN") : Locale.US;
-            int res = tts.setLanguage(target);
-            if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
-                tts.setLanguage(Locale.ENGLISH);
-                if (useMalayalam && statusText != null) {
-                    statusText.setText("Malayalam TTS pack missing in Android settings");
+            if (useMalayalam) {
+                int mlRes = tts.setLanguage(new Locale("ml", "IN"));
+                if (mlRes == TextToSpeech.LANG_MISSING_DATA || mlRes == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    tts.setLanguage(Locale.US);
+                    if (statusText != null) {
+                        statusText.setText("Malayalam TTS not installed • Using English voice");
+                    }
+                    if (speakNotice) {
+                        tts.speak("Malayalam voice data not found. Using English.", TextToSpeech.QUEUE_FLUSH, null, "ml_fallback");
+                    }
+                    return;
+                }
+                if (statusText != null) {
+                    statusText.setText("Malayalam voice active");
+                }
+            } else {
+                int enRes = tts.setLanguage(Locale.US);
+                if (enRes == TextToSpeech.LANG_MISSING_DATA || enRes == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    tts.setLanguage(Locale.ENGLISH);
+                }
+                if (statusText != null) {
+                    statusText.setText("English voice active");
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            if (statusText != null) {
+                statusText.setText("Voice error: " + e.getMessage());
+            }
         }
     }
 
     private void speakText(String text) {
-        if (text == null || text.trim().isEmpty()) {
-            if (statusText != null) {
-                statusText.setText(useMalayalam ? "വായിക്കാൻ ടെക്സ്റ്റ് ഒന്നുമില്ല" : "Nothing to speak");
-            }
-            return;
-        }
+        String say = (text == null || text.trim().isEmpty())
+                ? (useMalayalam ? "നമസ്കാരം, കോഡ് സ്റ്റുഡിയോ തയ്യാറാണ്" : "Hello, Cod Studio is ready")
+                : text.trim();
+
         if (!ttsReady || tts == null) {
+            Toast.makeText(this, "TTS engine starting, try again in a second", Toast.LENGTH_SHORT).show();
             if (statusText != null) {
-                statusText.setText("Voice starting...");
+                statusText.setText("TTS not ready yet");
             }
             return;
         }
-        applyVoiceLanguage();
-        String toSay = text.length() > 350 ? text.substring(0, 350) : text;
-        tts.speak(toSay, TextToSpeech.QUEUE_FLUSH, null, "cod_studio_id");
+
+        applyVoiceLanguage(false);
+        String toSay = say.length() > 350 ? say.substring(0, 350) : say;
+        int qRes = tts.speak(toSay, TextToSpeech.QUEUE_FLUSH, null, "cod_studio_utterance");
+        if (qRes == TextToSpeech.ERROR) {
+            Toast.makeText(this, "Could not speak text", Toast.LENGTH_SHORT).show();
+        } else if (statusText != null) {
+            statusText.setText("Speaking: " + toSay);
+        }
     }
 
     private void buildEditorUi() {
@@ -123,25 +153,17 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         btnLang.setOnClickListener(v -> {
             useMalayalam = !useMalayalam;
             btnLang.setText(useMalayalam ? "Lang: ML" : "Lang: EN");
-            applyVoiceLanguage();
-            String reply = useMalayalam ? "മലയാളം വോയിസ് സജീവമാക്കി" : "English voice activated";
-            statusText.setText(reply);
-            speakText(reply);
+            applyVoiceLanguage(true);
+            speakText(useMalayalam ? "മലയാളം വോയിസ് സജീവമാക്കി" : "English voice activated");
         });
         topRow.addView(btnLang);
 
         Button btnSpeak = makeBtn("Speak", "#1F6FEB", Color.WHITE);
-        btnSpeak.setOnClickListener(v -> {
-            String txt = codeEditor.getText().toString().trim();
-            if (txt.isEmpty()) {
-                txt = useMalayalam ? "നമസ്കാരം, കോഡ് സ്റ്റുഡിയോ തയ്യാറാണ്" : "Hello, Cod Studio is ready";
-            }
-            speakText(txt);
-        });
+        btnSpeak.setOnClickListener(v -> speakText(codeEditor.getText().toString()));
         topRow.addView(btnSpeak);
 
         statusText = new TextView(this);
-        statusText.setText("Ready • EN/ML Voice & Code Editor");
+        statusText.setText("Starting Voice Engine...");
         statusText.setTextColor(Color.parseColor(TEXT_DIM));
         statusText.setTextSize(12f);
         statusText.setPadding(0, 8, 0, 12);
