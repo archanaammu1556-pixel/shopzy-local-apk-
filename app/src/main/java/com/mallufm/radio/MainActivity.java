@@ -1,1359 +1,336 @@
-package com.mallufm.radio;
+package com.mallufm.codstudio;
 
-import android.animation.ValueAnimator;
-import android.Manifest;
 import android.app.Activity;
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
-import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.os.Build;
-import android.content.Context;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.LinearGradient;
-import android.graphics.Paint;
-import android.graphics.RectF;
-import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.media.AudioManager;
-import android.media.MediaPlayer;
-import android.media.audiofx.Equalizer;
+import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.PowerManager;
+import android.os.Environment;
+import android.speech.tts.TextToSpeech;
 import android.view.Gravity;
-import android.view.KeyEvent;
-import android.view.MotionEvent;
-import android.view.View;
-import android.view.animation.LinearInterpolator;
+import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.FrameLayout;
+import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import org.json.JSONArray;
-import org.json.JSONObject;
+import android.widget.Toast;
 import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements TextToSpeech.OnInitListener {
 
-    private static final String CHANNELS_JSON_URL =
-            "https://raw.githubusercontent.com/archanaammu1556-pixel/shopzy-local-apk-/main/channels.json";
+    private static final String BG = "#0D1117";
+    private static final String PANEL = "#161B22";
+    private static final String BORDER = "#30363D";
+    private static final String ACCENT = "#58A6FF";
+    private static final String GREEN = "#238636";
+    private static final String PURPLE = "#8957E5";
+    private static final String TEXT_DIM = "#8B949E";
 
-    private static class Channel {
-        String name;
-        String url;
-        float freq;
-        Channel(String name, String url, float freq) {
-            this.name = name;
-            this.url = url;
-            this.freq = freq;
-        }
-    }
-
-    private final List<Channel> channels = new ArrayList<>();
-    private MediaPlayer mediaPlayer;
-    private Equalizer equalizer;
-    private SpectrumBgView bgView;
-    private TunerScaleView scaleView;
-    private TunerKnobView knobView;
-    private TunerKnobView bassKnob;
-    private TunerKnobView midKnob;
-    private TunerKnobView trebleKnob;
-    private TextView freqText;
-    private TextView channelNameText;
+    private EditText filePathInput;
+    private EditText codeEditor;
     private TextView statusText;
-    private TextView volumeText;
-    private TextView eqStatusText;
-    private TextView bassValText;
-    private TextView midValText;
-    private TextView trebleValText;
-    private LinearLayout presetLayout;
-    private int currentIndex = -1;
-    private boolean isPlaying = false;
-    private int retryCount = 0;
-    private static final int MAX_RETRIES = 3;
-    private static final String NOTIF_CHANNEL_ID = "mallu_fm_playback_channel";
-    private static final int NOTIF_ID = 1001;
-    private static final String ACTION_TOGGLE_PLAY = "com.mallufm.radio.ACTION_TOGGLE_PLAY";
-    private static final String ACTION_NEXT_CHANNEL = "com.mallufm.radio.ACTION_NEXT_CHANNEL";
-    private boolean playbackReceiverRegistered = false;
+    private Button btnLang;
 
-    private final BroadcastReceiver playbackActionReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (intent == null || intent.getAction() == null) return;
-            String act = intent.getAction();
-            if (ACTION_TOGGLE_PLAY.equals(act)) {
-                if (isPlaying) {
-                    stopPlayback();
-                } else if (currentIndex >= 0 && currentIndex < channels.size()) {
-                    playChannel(currentIndex);
-                } else if (!channels.isEmpty()) {
-                    playChannel(0);
-                }
-            } else if (ACTION_NEXT_CHANNEL.equals(act)) {
-                tuneStep(1);
-            }
-        }
-    };
-
-
-    private final Handler retryHandler = new Handler(Looper.getMainLooper());
-    private PowerManager.WakeLock wakeLock;
-    private float volumeLevel = 0.8f;
-
-    private int bassLevel = 25;
-    private int midLevel = 0;
-    private int trebleLevel = 15;
+    private TextToSpeech tts;
+    private boolean ttsReady = false;
+    private boolean useMalayalam = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        tts = new TextToSpeech(this, this);
+        buildEditorUi();
+    }
 
-        FrameLayout frameRoot = new FrameLayout(this);
-        bgView = new SpectrumBgView(this);
-        frameRoot.addView(bgView, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+    @Override
+    public void onInit(int status) {
+        if (status == TextToSpeech.SUCCESS) {
+            ttsReady = true;
+            applyVoiceLanguage();
+        } else {
+            statusText.setText("Voice engine not available on this device");
+        }
+    }
 
+    private void applyVoiceLanguage() {
+        if (!ttsReady || tts == null) return;
+        Locale target = useMalayalam ? new Locale("ml", "IN") : Locale.US;
+        int res = tts.setLanguage(target);
+        if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+            if (useMalayalam) {
+                statusText.setText("Malayalam TTS data missing. Install Malayalam voice in TTS settings.");
+            } else {
+                tts.setLanguage(Locale.ENGLISH);
+            }
+        }
+    }
+
+    private void speakText(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            String emptyMsg = useMalayalam ? "വായിക്കാൻ ടെക്സ്റ്റ് ഒന്നുമില്ല" : "Nothing to speak";
+            statusText.setText(emptyMsg);
+            return;
+        }
+        if (!ttsReady || tts == null) {
+            statusText.setText("Voice is starting...");
+            return;
+        }
+        applyVoiceLanguage();
+        String toSay = text.length() > 400 ? text.substring(0, 400) : text;
+        tts.speak(toSay, TextToSpeech.QUEUE_FLUSH, null, "cod_studio_utterance");
+    }
+
+    private void buildEditorUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.TRANSPARENT);
-        root.setPadding(dp(10), dp(10), dp(10), dp(10));
-        root.setWeightSum(1f);
+        root.setBackgroundColor(Color.parseColor(BG));
+        root.setPadding(22, 30, 22, 22);
 
-        // Top Glassmorphic Tuner Scale & Frequency Display Card
-        LinearLayout topPanel = new LinearLayout(this);
-        topPanel.setOrientation(LinearLayout.VERTICAL);
-        topPanel.setBackground(createGlassCard(Color.parseColor("#CC0D192B"), Color.parseColor("#4438BDF8"), dp(16)));
-        topPanel.setPadding(dp(14), dp(10), dp(14), dp(8));
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+        root.addView(topRow);
+
+        TextView header = new TextView(this);
+        header.setText("COD STUDIO");
+        header.setTextColor(Color.parseColor(ACCENT));
+        header.setTextSize(20f);
+        header.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        topRow.addView(header, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        btnLang = makeBtn("Lang: EN", PURPLE, Color.WHITE);
+        btnLang.setOnClickListener(v -> {
+            useMalayalam = !useMalayalam;
+            btnLang.setText(useMalayalam ? "Lang: ML" : "Lang: EN");
+            applyVoiceLanguage();
+            String reply = useMalayalam
+                    ? "മലയാളം വോയിസ് സജീവമാക്കി"
+                    : "English voice activated";
+            statusText.setText(reply);
+            speakText(reply);
+        });
+        topRow.addView(btnLang);
+
+        Button btnSpeak = makeBtn("Speak", "#1F6FEB", Color.WHITE);
+        btnSpeak.setOnClickListener(v -> {
+            String selectedOrAll = codeEditor.getText().toString().trim();
+            if (selectedOrAll.isEmpty()) {
+                selectedOrAll = useMalayalam
+                        ? "നമസ്കാരം, കോഡ് സ്റ്റുഡിയോ തയ്യാറാണ്"
+                        : "Hello, Cod Studio is ready";
+            }
+            speakText(selectedOrAll);
+        });
+        topRow.addView(btnSpeak);
 
         statusText = new TextView(this);
-        statusText.setText("Loading Malayalam FM...");
-        statusText.setTextSize(11f);
-        statusText.setTextColor(Color.parseColor("#7DD3FC"));
-        statusText.setGravity(Gravity.CENTER);
-        topPanel.addView(statusText);
+        statusText.setText("Ready • Tap EN/ML for voice & Speak to talk back");
+        statusText.setTextColor(Color.parseColor(TEXT_DIM));
+        statusText.setTextSize(12f);
+        statusText.setPadding(0, 8, 0, 12);
+        root.addView(statusText);
 
-        scaleView = new TunerScaleView(this);
-        scaleView.setOnTuneListener(new TunerScaleView.OnTuneListener() {
-            @Override
-            public void onTuneFrequency(float targetFreq, boolean commitPlay) {
-                float rounded = Math.round(targetFreq * 10f) / 10f;
-                freqText.setText(String.format("%.1f MHz", rounded));
-                int bestIdx = findNearestChannelIndex(rounded);
-                if (bestIdx >= 0 && bestIdx < channels.size()) {
-                    Channel bestCh = channels.get(bestIdx);
-                    channelNameText.setText(bestCh.name);
-                    highlightPresets(bestIdx);
-                    if (commitPlay) {
-                        playChannel(bestIdx);
-                    }
-                }
-            }
+        LinearLayout pathRow = new LinearLayout(this);
+        pathRow.setOrientation(LinearLayout.HORIZONTAL);
+        pathRow.setGravity(Gravity.CENTER_VERTICAL);
+        root.addView(pathRow);
+
+        String defaultFile = new File(Environment.getExternalStorageDirectory(), "Download/snippet.py").getAbsolutePath();
+        filePathInput = new EditText(this);
+        filePathInput.setText(defaultFile);
+        filePathInput.setTextColor(Color.WHITE);
+        filePathInput.setTextSize(12f);
+        filePathInput.setSingleLine(true);
+        filePathInput.setTypeface(Typeface.MONOSPACE);
+        GradientDrawable pathBg = new GradientDrawable();
+        pathBg.setColor(Color.parseColor(PANEL));
+        pathBg.setStroke(2, Color.parseColor(BORDER));
+        pathBg.setCornerRadius(14f);
+        filePathInput.setBackground(pathBg);
+        filePathInput.setPadding(18, 14, 18, 14);
+        LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        pLp.setMargins(0, 0, 10, 0);
+        pathRow.addView(filePathInput, pLp);
+
+        Button btnLoad = makeBtn("Load", PANEL, Color.WHITE);
+        Button btnSave = makeBtn("Save", GREEN, Color.WHITE);
+        pathRow.addView(btnLoad);
+        pathRow.addView(btnSave);
+
+        btnLoad.setOnClickListener(v -> loadFile());
+        btnSave.setOnClickListener(v -> saveFile());
+
+        HorizontalScrollView snipScroll = new HorizontalScrollView(this);
+        snipScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sLp.setMargins(0, 14, 0, 12);
+        root.addView(snipScroll, sLp);
+
+        LinearLayout snipRow = new LinearLayout(this);
+        snipRow.setOrientation(LinearLayout.HORIZONTAL);
+        snipScroll.addView(snipRow);
+
+        Button bPy = makeBtn("Python", PANEL, Color.parseColor(ACCENT));
+        Button bGit = makeBtn("Git Push", PANEL, Color.parseColor(ACCENT));
+        Button bHtml = makeBtn("HTML", PANEL, Color.parseColor(ACCENT));
+        Button bCopy = makeBtn("Copy All", "#1F6FEB", Color.WHITE);
+        Button bTermux = makeBtn("Open Termux", PANEL, Color.WHITE);
+
+        snipRow.addView(bPy);
+        snipRow.addView(bGit);
+        snipRow.addView(bHtml);
+        snipRow.addView(bCopy);
+        snipRow.addView(bTermux);
+
+        bPy.setOnClickListener(v -> {
+            insertSnippet("#!/usr/bin/env python3\n\ndef main():\n    print(\"Hello from Cod Studio\")\n\nif __name__ == \"__main__\":\n    main()\n");
+            speakText(useMalayalam ? "പൈത്തൺ കോഡ് ചേർത്തു" : "Python snippet inserted");
         });
-        LinearLayout.LayoutParams scaleParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
-        scaleParams.topMargin = dp(3);
-        topPanel.addView(scaleView, scaleParams);
-
-        freqText = new TextView(this);
-        freqText.setText("98.1 MHz");
-        freqText.setTextSize(28f);
-        freqText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        freqText.setTextColor(Color.parseColor("#F0F9FF"));
-        freqText.setShadowLayer(12f, 0f, 0f, Color.parseColor("#38BDF8"));
-        freqText.setGravity(Gravity.CENTER);
-        topPanel.addView(freqText);
-
-        channelNameText = new TextView(this);
-        channelNameText.setText("Mallu FM");
-        channelNameText.setTextSize(14f);
-        channelNameText.setTypeface(Typeface.DEFAULT_BOLD);
-        channelNameText.setTextColor(Color.parseColor("#38BDF8"));
-        channelNameText.setGravity(Gravity.CENTER);
-        topPanel.addView(channelNameText);
-
-        volumeText = new TextView(this);
-        volumeText.setText("VOLUME: 80%");
-        volumeText.setTextSize(11f);
-        volumeText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        volumeText.setTextColor(Color.parseColor("#4ADE80"));
-        volumeText.setGravity(Gravity.CENTER);
-        volumeText.setPadding(0, dp(2), 0, 0);
-        topPanel.addView(volumeText);
-
-        LinearLayout.LayoutParams topParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.30f);
-        topParams.bottomMargin = dp(6);
-        root.addView(topPanel, topParams);
-
-        // Middle Rotary Volume Knob Stage
-        LinearLayout middlePanel = new LinearLayout(this);
-        middlePanel.setOrientation(LinearLayout.VERTICAL);
-        middlePanel.setGravity(Gravity.CENTER);
-        middlePanel.setBackgroundColor(Color.TRANSPARENT);
-        middlePanel.setPadding(dp(8), dp(2), dp(8), dp(2));
-
-        LinearLayout dialRow = new LinearLayout(this);
-        dialRow.setOrientation(LinearLayout.HORIZONTAL);
-        dialRow.setGravity(Gravity.CENTER);
-
-        Button prevBtn = createArrowButton("<");
-        prevBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                tuneStep(-1);
-            }
+        bGit.setOnClickListener(v -> {
+            insertSnippet("git status && git add -A && git commit -m \"Update code\" && git push\n");
+            speakText(useMalayalam ? "ജിറ്റ് കമാൻഡ് ചേർത്തു" : "Git command inserted");
         });
-        dialRow.addView(prevBtn);
-
-        knobView = new TunerKnobView(this, 8500L, 0f);
-        LinearLayout.LayoutParams knobParams = new LinearLayout.LayoutParams(dp(146), dp(146));
-        knobParams.leftMargin = dp(12);
-        knobParams.rightMargin = dp(12);
-        knobView.setOnRotateListener(new TunerKnobView.OnRotateListener() {
-            @Override
-            public void onRotateDelta(float deltaDegrees, float knobAngle) {
-                float nextVol = volumeLevel + (deltaDegrees / 270f);
-                setAppVolume(nextVol, knobAngle);
-            }
+        bHtml.setOnClickListener(v -> {
+            insertSnippet("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Cod Studio</title></head>\n<body><h1>Hello Cod Studio</h1></body>\n</html>\n");
+            speakText(useMalayalam ? "എച്ച് ടി എം എൽ ടെംപ്ലേറ്റ് ചേർത്തു" : "HTML template inserted");
         });
-        dialRow.addView(knobView, knobParams);
+        bCopy.setOnClickListener(v -> copyAllToClipboard());
+        bTermux.setOnClickListener(v -> launchTermux());
 
-        Button nextBtn = createArrowButton(">");
-        nextBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                tuneStep(1);
-            }
-        });
-        dialRow.addView(nextBtn);
+        codeEditor = new EditText(this);
+        codeEditor.setHint("# Write code or notes here, then tap Speak...");
+        codeEditor.setHintTextColor(Color.parseColor(TEXT_DIM));
+        codeEditor.setTextColor(Color.parseColor("#E6EDF3"));
+        codeEditor.setTextSize(14f);
+        codeEditor.setGravity(Gravity.TOP | Gravity.START);
+        codeEditor.setTypeface(Typeface.MONOSPACE);
+        codeEditor.setHorizontallyScrolling(true);
+        GradientDrawable edBg = new GradientDrawable();
+        edBg.setColor(Color.parseColor(PANEL));
+        edBg.setStroke(2, Color.parseColor(BORDER));
+        edBg.setCornerRadius(16f);
+        codeEditor.setBackground(edBg);
+        codeEditor.setPadding(20, 20, 20, 20);
 
-        middlePanel.addView(dialRow);
+        root.addView(codeEditor, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        LinearLayout actionRow = new LinearLayout(this);
-        actionRow.setOrientation(LinearLayout.HORIZONTAL);
-        actionRow.setGravity(Gravity.CENTER);
-        actionRow.setPadding(0, dp(3), 0, 0);
-
-        Button playPauseBtn = createActionButton("PLAY / STOP");
-        playPauseBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (isPlaying) {
-                    stopPlayback();
-                } else if (currentIndex >= 0 && currentIndex < channels.size()) {
-                    playChannel(currentIndex);
-                } else if (!channels.isEmpty()) {
-                    playChannel(0);
-                } else {
-                    fetchChannelsAsync(true);
-                }
-            }
-        });
-        LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        playLp.rightMargin = dp(10);
-        actionRow.addView(playPauseBtn, playLp);
-
-        Button refreshBtn = createActionButton("REFRESH");
-        refreshBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                fetchChannelsAsync(false);
-            }
-        });
-        actionRow.addView(refreshBtn);
-
-        middlePanel.addView(actionRow);
-
-        LinearLayout.LayoutParams midParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.27f);
-        root.addView(middlePanel, midParams);
-
-        // Equalizer Card with Small Ambient Color Knobs
-        LinearLayout eqPanel = new LinearLayout(this);
-        eqPanel.setOrientation(LinearLayout.VERTICAL);
-        eqPanel.setBackground(createGlassCard(Color.parseColor("#B80B1220"), Color.parseColor("#3394A3B8"), dp(16)));
-        eqPanel.setPadding(dp(10), dp(6), dp(10), dp(4));
-
-        LinearLayout eqHeader = new LinearLayout(this);
-        eqHeader.setOrientation(LinearLayout.HORIZONTAL);
-        eqHeader.setGravity(Gravity.CENTER_VERTICAL);
-
-        eqStatusText = new TextView(this);
-        eqStatusText.setText("EQ KNOBS");
-        eqStatusText.setTextSize(10f);
-        eqStatusText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        eqStatusText.setTextColor(Color.parseColor("#FBBF24"));
-        LinearLayout.LayoutParams hdrLp = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        eqHeader.addView(eqStatusText, hdrLp);
-
-        Button flatBtn = createEqPresetButton("FLAT");
-        flatBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                applyEqPreset(0, 0, 0, "FLAT");
-            }
-        });
-        eqHeader.addView(flatBtn);
-
-        Button bassBoostBtn = createEqPresetButton("BASS+");
-        bassBoostBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                applyEqPreset(75, 5, 20, "BASS+");
-            }
-        });
-        eqHeader.addView(bassBoostBtn);
-
-        Button vocalBtn = createEqPresetButton("VOCAL");
-        vocalBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                applyEqPreset(-10, 60, 35, "VOCAL");
-            }
-        });
-        eqHeader.addView(vocalBtn);
-
-        eqPanel.addView(eqHeader);
-
-        LinearLayout knobsRow = new LinearLayout(this);
-        knobsRow.setOrientation(LinearLayout.HORIZONTAL);
-        knobsRow.setGravity(Gravity.CENTER);
-        knobsRow.setPadding(0, dp(2), 0, 0);
-
-        bassValText = new TextView(this);
-        bassKnob = new TunerKnobView(this, 6500L, 0f);
-        bassKnob.setOnRotateListener(new TunerKnobView.OnRotateListener() {
-            @Override
-            public void onRotateDelta(float deltaDegrees, float knobAngle) {
-                bassLevel = Math.max(-100, Math.min(100, bassLevel + Math.round(deltaDegrees / 1.35f)));
-                syncEqKnobsAndLabels("CUSTOM");
-                applyEqualizerSettings();
-            }
-        });
-        knobsRow.addView(createSmallEqKnobColumn("BASS", bassKnob, bassValText));
-
-        midValText = new TextView(this);
-        midKnob = new TunerKnobView(this, 7500L, 120f);
-        midKnob.setOnRotateListener(new TunerKnobView.OnRotateListener() {
-            @Override
-            public void onRotateDelta(float deltaDegrees, float knobAngle) {
-                midLevel = Math.max(-100, Math.min(100, midLevel + Math.round(deltaDegrees / 1.35f)));
-                syncEqKnobsAndLabels("CUSTOM");
-                applyEqualizerSettings();
-            }
-        });
-        knobsRow.addView(createSmallEqKnobColumn("MID", midKnob, midValText));
-
-        trebleValText = new TextView(this);
-        trebleKnob = new TunerKnobView(this, 9500L, 240f);
-        trebleKnob.setOnRotateListener(new TunerKnobView.OnRotateListener() {
-            @Override
-            public void onRotateDelta(float deltaDegrees, float knobAngle) {
-                trebleLevel = Math.max(-100, Math.min(100, trebleLevel + Math.round(deltaDegrees / 1.35f)));
-                syncEqKnobsAndLabels("CUSTOM");
-                applyEqualizerSettings();
-            }
-        });
-        knobsRow.addView(createSmallEqKnobColumn("TREBLE", trebleKnob, trebleValText));
-
-        eqPanel.addView(knobsRow);
-
-        LinearLayout.LayoutParams eqParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.29f);
-        eqParams.topMargin = dp(4);
-        eqParams.bottomMargin = dp(6);
-        root.addView(eqPanel, eqParams);
-
-        // Bottom Channel Preset Bar
-        HorizontalScrollView presetScroll = new HorizontalScrollView(this);
-        presetScroll.setBackground(createGlassCard(Color.parseColor("#B80B1220"), Color.parseColor("#2838BDF8"), dp(14)));
-        presetScroll.setFillViewport(true);
-
-        presetLayout = new LinearLayout(this);
-        presetLayout.setOrientation(LinearLayout.HORIZONTAL);
-        presetLayout.setGravity(Gravity.CENTER_VERTICAL);
-        presetLayout.setPadding(dp(8), dp(6), dp(8), dp(6));
-        presetScroll.addView(presetLayout);
-
-        LinearLayout.LayoutParams botParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.14f);
-        root.addView(presetScroll, botParams);
-
-        frameRoot.addView(root, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-
-        setContentView(frameRoot);
-        syncEqKnobsAndLabels("BASS+");
-        loadDefaultChannels();
-        renderChannelButtons();
-        updateTunerDisplay(-1);
-        setAppVolume(volumeLevel, (volumeLevel - 0.5f) * 270f);
-        syncVolumeFromSystem();
-        fetchChannelsAsync(false);
+        setContentView(root);
     }
 
-    private GradientDrawable createGlassCard(int fillColor, int strokeColor, int radiusPx) {
-        GradientDrawable gd = new GradientDrawable();
-        gd.setColor(fillColor);
-        gd.setCornerRadius(radiusPx);
-        gd.setStroke(dp(1), strokeColor);
-        return gd;
-    }
-
-    private LinearLayout createSmallEqKnobColumn(String title, TunerKnobView knob, TextView valueView) {
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams colLp = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        col.setLayoutParams(colLp);
-
-        TextView titleView = new TextView(this);
-        titleView.setText(title);
-        titleView.setTextSize(9f);
-        titleView.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        titleView.setTextColor(Color.parseColor("#CBD5E1"));
-        titleView.setGravity(Gravity.CENTER);
-        col.addView(titleView);
-
-        LinearLayout.LayoutParams kLp = new LinearLayout.LayoutParams(dp(64), dp(64));
-        kLp.topMargin = dp(1);
-        kLp.bottomMargin = dp(1);
-        col.addView(knob, kLp);
-
-        valueView.setTextSize(9f);
-        valueView.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        valueView.setTextColor(Color.parseColor("#93C5FD"));
-        valueView.setGravity(Gravity.CENTER);
-        col.addView(valueView);
-
-        return col;
-    }
-
-    private Button createEqPresetButton(String label) {
+    private Button makeBtn(String label, String bgHex, int fgColor) {
         Button b = new Button(this);
         b.setText(label);
-        b.setTextSize(9f);
-        b.setAllCaps(true);
-        b.setTextColor(Color.parseColor("#E2E8F0"));
-        b.setBackground(createGlassCard(Color.parseColor("#1E293B"), Color.parseColor("#475569"), dp(8)));
-        b.setMinHeight(0);
-        b.setMinimumWidth(0);
-        b.setPadding(dp(8), dp(2), dp(8), dp(2));
+        b.setTextColor(fgColor);
+        b.setAllCaps(false);
+        b.setTextSize(12f);
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(Color.parseColor(bgHex));
+        gd.setStroke(1, Color.parseColor(BORDER));
+        gd.setCornerRadius(14f);
+        b.setBackground(gd);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.leftMargin = dp(4);
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, 0, 8, 0);
         b.setLayoutParams(lp);
         return b;
     }
 
-    private void applyEqPreset(int bass, int mid, int treble, String modeName) {
-        bassLevel = bass;
-        midLevel = mid;
-        trebleLevel = treble;
-        syncEqKnobsAndLabels(modeName);
-        applyEqualizerSettings();
+    private void insertSnippet(String snippet) {
+        int start = Math.max(0, codeEditor.getSelectionStart());
+        codeEditor.getText().insert(start, snippet);
+        statusText.setText("Inserted snippet");
     }
 
-    private void syncEqKnobsAndLabels(String modeName) {
-        if (bassKnob != null) bassKnob.setAngle((bassLevel / 100f) * 135f);
-        if (midKnob != null) midKnob.setAngle((midLevel / 100f) * 135f);
-        if (trebleKnob != null) trebleKnob.setAngle((trebleLevel / 100f) * 135f);
-
-        if (bassValText != null) bassValText.setText((bassLevel > 0 ? "+" : "") + bassLevel);
-        if (midValText != null) midValText.setText((midLevel > 0 ? "+" : "") + midLevel);
-        if (trebleValText != null) trebleValText.setText((trebleLevel > 0 ? "+" : "") + trebleLevel);
-
-        if (eqStatusText != null) {
-            eqStatusText.setText("EQ KNOBS [" + modeName + "]");
+    private void copyAllToClipboard() {
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm != null) {
+            ClipData clip = ClipData.newPlainText("CodStudio", codeEditor.getText().toString());
+            cm.setPrimaryClip(clip);
+            Toast.makeText(this, "Copied to clipboard", Toast.LENGTH_SHORT).show();
+            String msg = useMalayalam ? "കോഡ് കോപ്പി ചെയ്തു" : "Copied to clipboard";
+            statusText.setText(msg);
+            speakText(msg);
         }
     }
 
-    private void initEqualizerForPlayer(MediaPlayer mp) {
-        hidePlaybackNotification();
-        releaseEqualizer();
-        if (mp == null) return;
+    private void launchTermux() {
         try {
-            equalizer = new Equalizer(0, mp.getAudioSessionId());
-            equalizer.setEnabled(true);
-            applyEqualizerSettings();
-        } catch (Exception ignored) {
-            equalizer = null;
-        }
-    }
-
-    private void applyEqualizerSettings() {
-        if (equalizer == null) return;
-        try {
-            short bands = equalizer.getNumberOfBands();
-            short[] range = equalizer.getBandLevelRange();
-            if (bands <= 0 || range == null || range.length < 2) return;
-            int minLevel = range[0];
-            int maxLevel = range[1];
-
-            for (short b = 0; b < bands; b++) {
-                float pos;
-                if (bands == 1) {
-                    pos = bassLevel / 100f;
-                } else {
-                    float ratio = (float) b / (float) (bands - 1);
-                    if (ratio < 0.35f) {
-                        pos = bassLevel / 100f;
-                    } else if (ratio <= 0.70f) {
-                        pos = midLevel / 100f;
-                    } else {
-                        pos = trebleLevel / 100f;
-                    }
-                }
-                pos = Math.max(-1f, Math.min(1f, pos));
-                short targetLevel;
-                if (pos >= 0f) {
-                    targetLevel = (short) Math.round(pos * maxLevel);
-                } else {
-                    targetLevel = (short) Math.round((-pos) * minLevel);
-                }
-                equalizer.setBandLevel(b, targetLevel);
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void releaseEqualizer() {
-        if (equalizer != null) {
-            try {
-                equalizer.release();
-            } catch (Exception ignored) {
-            }
-            equalizer = null;
-        }
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
-
-    private Button createArrowButton(String label) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextSize(22f);
-        b.setTextColor(Color.parseColor("#E2E8F0"));
-        b.setBackground(createGlassCard(Color.parseColor("#881E293B"), Color.parseColor("#4438BDF8"), dp(24)));
-        b.setMinimumWidth(dp(46));
-        b.setMinimumHeight(dp(46));
-        return b;
-    }
-
-    private Button createActionButton(String label) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextSize(10f);
-        b.setAllCaps(true);
-        b.setTextColor(Color.parseColor("#F1F5F9"));
-        b.setBackground(createGlassCard(Color.parseColor("#AA1E293B"), Color.parseColor("#5538BDF8"), dp(10)));
-        b.setPadding(dp(14), dp(4), dp(14), dp(4));
-        return b;
-    }
-
-    private void setAppVolume(float level, float knobAngle) {
-        volumeLevel = Math.max(0f, Math.min(1f, level));
-        int pct = Math.round(volumeLevel * 100f);
-        if (volumeText != null) {
-            volumeText.setText(pct == 0 ? "VOLUME: MUTED (0%)" : ("VOLUME: " + pct + "%"));
-            volumeText.setTextColor(pct == 0 ? Color.parseColor("#F87171") : Color.parseColor("#4ADE80"));
-        }
-        if (knobView != null) {
-            knobView.setAngle(knobAngle);
-        }
-        applyVolumeToPlayer();
-    }
-
-    private void applyVolumeToPlayer() {
-        if (mediaPlayer != null) {
-            try {
-                mediaPlayer.setVolume(volumeLevel, volumeLevel);
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    private float computeFrequency(int index, int total) {
-        if (total <= 1) return 98.1f;
-        float start = 90.0f;
-        float end = 107.9f;
-        float raw = start + ((end - start) * index) / (total - 1);
-        return Math.round(raw * 10f) / 10f;
-    }
-
-    private int findNearestChannelIndex(float targetFreq) {
-        if (channels.isEmpty()) return -1;
-        int bestIdx = 0;
-        float bestDiff = Math.abs(channels.get(0).freq - targetFreq);
-        for (int i = 1; i < channels.size(); i++) {
-            float diff = Math.abs(channels.get(i).freq - targetFreq);
-            if (diff < bestDiff) {
-                bestDiff = diff;
-                bestIdx = i;
-            }
-        }
-        return bestIdx;
-    }
-
-    private void syncVolumeFromSystem() {
-        try {
-            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-            if (am != null) {
-                int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-                int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-                if (max > 0) {
-                    float ratio = (float) cur / (float) max;
-                    float knobAngle = (ratio - 0.5f) * 270f;
-                    setAppVolume(ratio, knobAngle);
-                }
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-            if (am != null) {
-                int dir = (keyCode == KeyEvent.KEYCODE_VOLUME_UP)
-                        ? AudioManager.ADJUST_RAISE
-                        : AudioManager.ADJUST_LOWER;
-                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI);
-                int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-                int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-                if (max > 0) {
-                    float ratio = (float) cur / (float) max;
-                    float knobAngle = (ratio - 0.5f) * 270f;
-                    setAppVolume(ratio, knobAngle);
-                }
-                return true;
-            }
-        }
-        return super.onKeyDown(keyCode, event);
-    }
-
-    private void registerPlaybackActionsReceiver() {
-        if (playbackReceiverRegistered) return;
-        try {
-            IntentFilter filter = new IntentFilter();
-            filter.addAction(ACTION_TOGGLE_PLAY);
-            filter.addAction(ACTION_NEXT_CHANNEL);
-            if (Build.VERSION.SDK_INT >= 33) {
-                registerReceiver(playbackActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            Intent launch = getPackageManager().getLaunchIntentForPackage("com.termux");
+            if (launch != null) {
+                startActivity(launch);
             } else {
-                registerReceiver(playbackActionReceiver, filter);
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://termux.dev")));
             }
-            playbackReceiverRegistered = true;
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            statusText.setText("Could not launch Termux");
         }
     }
 
-    private void unregisterPlaybackActionsReceiver() {
-        if (!playbackReceiverRegistered) return;
-        try {
-            unregisterReceiver(playbackActionReceiver);
-            playbackReceiverRegistered = false;
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void requestNotifPermissionIfNeeded() {
-        try {
-            if (Build.VERSION.SDK_INT >= 33) {
-                if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 2001);
-                }
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void ensureNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-            if (nm != null && nm.getNotificationChannel(NOTIF_CHANNEL_ID) == null) {
-                NotificationChannel channel = new NotificationChannel(
-                        NOTIF_CHANNEL_ID,
-                        "Mallu FM Playback",
-                        NotificationManager.IMPORTANCE_LOW
-                );
-                channel.setDescription("Shows active Malayalam FM stream in notification bar");
-                nm.createNotificationChannel(channel);
-            }
-        }
-    }
-
-    private void showPlaybackNotification(String title, String content) {
-        try {
-            requestNotifPermissionIfNeeded();
-            ensureNotificationChannel();
-            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-            if (nm == null) return;
-
-            Intent openIntent = new Intent(this, MainActivity.class);
-            openIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                piFlags |= PendingIntent.FLAG_IMMUTABLE;
-            }
-            PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, openIntent, piFlags);
-
-            registerPlaybackActionsReceiver();
-
-            int mutableFlag = PendingIntent.FLAG_UPDATE_CURRENT;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                mutableFlag |= PendingIntent.FLAG_IMMUTABLE;
-            }
-
-            Intent toggleIntent = new Intent(ACTION_TOGGLE_PLAY);
-            toggleIntent.setPackage(getPackageName());
-            PendingIntent togglePi = PendingIntent.getBroadcast(this, 1, toggleIntent, mutableFlag);
-
-            Intent nextIntent = new Intent(ACTION_NEXT_CHANNEL);
-            nextIntent.setPackage(getPackageName());
-            PendingIntent nextPi = PendingIntent.getBroadcast(this, 2, nextIntent, mutableFlag);
-
-            Notification.Builder builder = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                    ? new Notification.Builder(this, NOTIF_CHANNEL_ID)
-                    : new Notification.Builder(this);
-
-            String toggleLabel = isPlaying ? "Pause / Stop" : "Play";
-            int toggleIcon = isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play;
-
-            builder.setSmallIcon(android.R.drawable.ic_media_play)
-                    .setContentTitle(title)
-                    .setContentText(content)
-                    .setContentIntent(pendingIntent)
-                    .addAction(toggleIcon, toggleLabel, togglePi)
-                    .addAction(android.R.drawable.ic_media_next, "Next", nextPi)
-                    .setOngoing(true);
-
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-                builder.setPriority(Notification.PRIORITY_LOW);
-            }
-
-            nm.notify(NOTIF_ID, builder.build());
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void hidePlaybackNotification() {
-        try {
-            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-            if (nm != null) {
-                nm.cancel(NOTIF_ID);
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void tuneStep(int delta) {
-        if (channels.isEmpty()) return;
-        int base = currentIndex >= 0 ? currentIndex : 0;
-        int next = (base + delta + channels.size()) % channels.size();
-        playChannel(next);
-    }
-
-    private void updateTunerDisplay(int index) {
-        if (channels.isEmpty()) {
-            freqText.setText("98.1 MHz");
-            channelNameText.setText("No Channels");
-            scaleView.setFrequency(98.1f);
+    private void loadFile() {
+        String p = filePathInput.getText().toString().trim();
+        File f = new File(p);
+        if (!f.exists() || !f.isFile()) {
+            String msg = useMalayalam ? "ഫയൽ കണ്ടെത്താനായില്ല" : "File not found";
+            statusText.setText(msg + ": " + p);
+            speakText(msg);
             return;
         }
-        int idx = (index >= 0 && index < channels.size()) ? index : 0;
-        Channel ch = channels.get(idx);
-        freqText.setText(String.format("%.1f MHz", ch.freq));
-        channelNameText.setText(ch.name);
-        scaleView.setFrequency(ch.freq);
-        highlightPresets(idx);
-    }
-
-    private void highlightPresets(int activeIdx) {
-        if (presetLayout == null) return;
-        for (int i = 0; i < presetLayout.getChildCount(); i++) {
-            View child = presetLayout.getChildAt(i);
-            if (child instanceof Button) {
-                Button btn = (Button) child;
-                if (i == activeIdx) {
-                    btn.setTextColor(Color.parseColor("#38BDF8"));
-                    btn.setBackground(createGlassCard(Color.parseColor("#CC172A46"), Color.parseColor("#FF38BDF8"), dp(10)));
-                } else {
-                    btn.setTextColor(Color.parseColor("#CBD5E1"));
-                    btn.setBackground(createGlassCard(Color.parseColor("#99111827"), Color.parseColor("#3364748B"), dp(10)));
-                }
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                sb.append(line).append("\n");
             }
-        }
-    }
-
-    private void loadDefaultChannels() {
-        channels.clear();
-        channels.add(new Channel("Ahalia FM", "https://cast1.my-control-panel.com/proxy/ahaliafm/stream", 90.4f));
-        channels.add(new Channel("Radio Digital Malayali", "https://radio.digitalmalayali.in/listen/stream/radio.mp3", 98.1f));
-    }
-
-    private void fetchChannelsAsync(final boolean autoPlayFirst) {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    String cacheBuster = CHANNELS_JSON_URL + (CHANNELS_JSON_URL.contains("?") ? "&" : "?") + "t=" + System.currentTimeMillis();
-                    HttpURLConnection conn = (HttpURLConnection) new URL(cacheBuster).openConnection();
-                    conn.setConnectTimeout(7000);
-                    conn.setReadTimeout(7000);
-                    conn.setRequestProperty("Cache-Control", "no-cache");
-
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        sb.append(line);
-                    }
-                    reader.close();
-                    conn.disconnect();
-
-                    JSONObject obj = new JSONObject(sb.toString());
-                    JSONArray arr = obj.getJSONArray("channels");
-                    final List<Channel> fetched = new ArrayList<>();
-                    for (int i = 0; i < arr.length(); i++) {
-                        JSONObject item = arr.getJSONObject(i);
-                        String name = item.optString("name", "Channel " + (i + 1));
-                        String url = item.optString("url", "");
-                        if (!url.isEmpty()) {
-                            fetched.add(new Channel(name, url, 0f));
-                        }
-                    }
-                    for (int i = 0; i < fetched.size(); i++) {
-                        fetched.get(i).freq = computeFrequency(i, fetched.size());
-                    }
-
-                    if (!fetched.isEmpty()) {
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                channels.clear();
-                                channels.addAll(fetched);
-                                renderChannelButtons();
-                                statusText.setText("Channels updated (" + channels.size() + ")");
-                                if (autoPlayFirst) {
-                                    playChannel(0);
-                                } else {
-                                    updateTunerDisplay(currentIndex >= 0 ? currentIndex : 0);
-                                }
-                            }
-                        });
-                    }
-                } catch (Exception e) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            statusText.setText("Using saved/default list");
-                            updateTunerDisplay(currentIndex >= 0 ? currentIndex : 0);
-                            if (autoPlayFirst && !channels.isEmpty()) {
-                                playChannel(0);
-                            }
-                        }
-                    });
-                }
-            }
-        }).start();
-    }
-
-    private void renderChannelButtons() {
-        presetLayout.removeAllViews();
-        for (int i = 0; i < channels.size(); i++) {
-            final int idx = i;
-            Channel ch = channels.get(i);
-            Button btn = new Button(this);
-            btn.setText(String.format("%.1f\n%s", ch.freq, ch.name));
-            btn.setTextSize(10f);
-            btn.setAllCaps(false);
-            btn.setGravity(Gravity.CENTER);
-            btn.setPadding(dp(12), dp(3), dp(12), dp(3));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT);
-            lp.rightMargin = dp(8);
-            btn.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    playChannel(idx);
-                }
-            });
-            presetLayout.addView(btn, lp);
-        }
-        highlightPresets(currentIndex);
-    }
-
-    private void playChannel(int index) {
-        if (index < 0 || index >= channels.size()) return;
-        currentIndex = index;
-        final Channel ch = channels.get(index);
-        updateTunerDisplay(index);
-        statusText.setText("Buffering: " + ch.name);
-        stopPlayback();
-
-        retryHandler.removeCallbacksAndMessages(null);
-        acquireWakeLock();
-        mediaPlayer = new MediaPlayer();
-        mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
-        try {
-            mediaPlayer.setDataSource(ch.url);
-            mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-                @Override
-                public void onPrepared(MediaPlayer mp) {
-                    retryCount = 0;
-                    initEqualizerForPlayer(mp);
-                    applyVolumeToPlayer();
-                    mp.start();
-                    isPlaying = true;
-                    statusText.setText("Playing: " + ch.name);
-                    showPlaybackNotification("Mallu FM • " + ch.name, String.format("%.1f MHz • Playing in background", ch.freq));
-                }
-            });
-            mediaPlayer.setOnInfoListener(new MediaPlayer.OnInfoListener() {
-                @Override
-                public boolean onInfo(MediaPlayer mp, int what, int extra) {
-                    if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
-                        statusText.setText("Buffering: " + ch.name + "...");
-                        return true;
-                    } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
-                        statusText.setText("Playing: " + ch.name);
-                        return true;
-                    }
-                    return false;
-                }
-            });
-            mediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
-                @Override
-                public void onCompletion(MediaPlayer mp) {
-                    scheduleStreamRetry(index, "Stream ended, reconnecting...");
-                }
-            });
-            mediaPlayer.setOnErrorListener(new MediaPlayer.OnErrorListener() {
-                @Override
-                public boolean onError(MediaPlayer mp, int what, int extra) {
-                    scheduleStreamRetry(index, "Stream dropped, reconnecting...");
-                    return true;
-                }
-            });
-            mediaPlayer.prepareAsync();
+            codeEditor.setText(sb.toString());
+            String msg = useMalayalam ? "ഫയൽ ലോഡ് ചെയ്തു" : "Loaded " + f.getName();
+            statusText.setText(msg);
+            speakText(msg);
         } catch (Exception e) {
-            scheduleStreamRetry(index, "Connection error, reconnecting...");
+            statusText.setText("Read error: " + e.getMessage());
         }
     }
 
-    private void scheduleStreamRetry(final int index, final String reason) {
-        releaseEqualizer();
-        if (mediaPlayer != null) {
-            try {
-                mediaPlayer.reset();
-                mediaPlayer.release();
-            } catch (Exception ignored) {
-            }
-            mediaPlayer = null;
-        }
-        isPlaying = false;
-
-        if (retryCount < MAX_RETRIES) {
-            retryCount++;
-            statusText.setText(reason + " (" + retryCount + "/" + MAX_RETRIES + ")");
-            retryHandler.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    if (currentIndex == index && index >= 0 && index < channels.size()) {
-                        playChannel(index);
-                    }
-                }
-            }, 1500L);
-        } else {
-            retryCount = 0;
-            releaseWakeLock();
-            statusText.setText("Stream unstable, refreshing list...");
-            fetchChannelsAsync(false);
-        }
-    }
-
-    private void acquireWakeLock() {
+    private void saveFile() {
+        String p = filePathInput.getText().toString().trim();
+        File f = new File(p);
         try {
-            if (wakeLock == null) {
-                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-                if (pm != null) {
-                    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MalluFM:StreamLock");
-                }
+            File parent = f.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
             }
-            if (wakeLock != null && !wakeLock.isHeld()) {
-                wakeLock.acquire(30 * 60 * 1000L);
+            try (FileOutputStream fos = new FileOutputStream(f);
+                 OutputStreamWriter osw = new OutputStreamWriter(fos, StandardCharsets.UTF_8)) {
+                osw.write(codeEditor.getText().toString());
             }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void releaseWakeLock() {
-        try {
-            if (wakeLock != null && wakeLock.isHeld()) {
-                wakeLock.release();
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void stopPlayback() {
-        retryHandler.removeCallbacksAndMessages(null);
-        retryCount = 0;
-        isPlaying = false;
-        releaseWakeLock();
-        releaseEqualizer();
-        if (mediaPlayer != null) {
-            try {
-                if (mediaPlayer.isPlaying()) {
-                    mediaPlayer.stop();
-                }
-                mediaPlayer.reset();
-                mediaPlayer.release();
-            } catch (Exception ignored) {
-            }
-            mediaPlayer = null;
-        }
-        if (currentIndex >= 0 && currentIndex < channels.size()) {
-            statusText.setText("Stopped: " + channels.get(currentIndex).name);
+            String msg = useMalayalam ? "ഫയൽ സേവ് ചെയ്തു" : "Saved file";
+            statusText.setText(msg + ": " + f.getAbsolutePath());
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            speakText(msg);
+        } catch (Exception e) {
+            statusText.setText("Save error: " + e.getMessage());
         }
     }
 
     @Override
     protected void onDestroy() {
-        unregisterPlaybackActionsReceiver();
+        if (tts != null) {
+            tts.stop();
+            tts.shutdown();
+        }
         super.onDestroy();
-        if (bgView != null) bgView.stopAmbientAnimation();
-        if (knobView != null) knobView.stopAmbientAnimation();
-        if (bassKnob != null) bassKnob.stopAmbientAnimation();
-        if (midKnob != null) midKnob.stopAmbientAnimation();
-        if (trebleKnob != null) trebleKnob.stopAmbientAnimation();
-        stopPlayback();
-    }
-
-    private static class SpectrumBgView extends View {
-        private float hue = 200f;
-        private ValueAnimator bgAnimator;
-        private final Paint basePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint barPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF barRect = new RectF();
-
-        SpectrumBgView(Context context) {
-            super(context);
-            startAmbientAnimation();
-        }
-
-        private void startAmbientAnimation() {
-            if (bgAnimator != null) return;
-            bgAnimator = ValueAnimator.ofFloat(0f, 360f);
-            bgAnimator.setDuration(9000L);
-            bgAnimator.setRepeatCount(ValueAnimator.INFINITE);
-            bgAnimator.setRepeatMode(ValueAnimator.RESTART);
-            bgAnimator.setInterpolator(new LinearInterpolator());
-            bgAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-                @Override
-                public void onAnimationUpdate(ValueAnimator animation) {
-                    hue = (Float) animation.getAnimatedValue();
-                    invalidate();
-                }
-            });
-            bgAnimator.start();
-        }
-
-        void stopAmbientAnimation() {
-            if (bgAnimator != null) {
-                bgAnimator.cancel();
-                bgAnimator = null;
-            }
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            float w = getWidth();
-            float h = getHeight();
-            if (w <= 0 || h <= 0) return;
-
-            basePaint.setShader(new LinearGradient(
-                    0, 0, 0, h,
-                    new int[]{
-                        Color.parseColor("#040711"),
-                        Color.parseColor("#091326"),
-                        Color.parseColor("#040711")
-                    },
-                    new float[]{0f, 0.5f, 1f},
-                    Shader.TileMode.CLAMP));
-            canvas.drawRect(0, 0, w, h, basePaint);
-
-            int barCount = 26;
-            float gap = 6f;
-            float barWidth = Math.max(4f, (w - (barCount + 1) * gap) / barCount);
-            float phase = (hue / 360f) * (float) (Math.PI * 2.0);
-
-            for (int i = 0; i < barCount; i++) {
-                float norm = (float) Math.abs(Math.sin(phase + i * 0.42f)) * 0.72f
-                        + (float) Math.abs(Math.cos(phase * 1.35f - i * 0.25f)) * 0.28f;
-                float barH = h * (0.10f + 0.52f * norm);
-                float left = gap + i * (barWidth + gap);
-                float top = h * 0.52f - barH * 0.5f;
-                float bottom = h * 0.52f + barH * 0.5f;
-
-                int barColor = Color.HSVToColor(
-                        82,
-                        new float[]{(hue + i * 9f) % 360f, 0.90f, 1.0f});
-                barPaint.setColor(barColor);
-                barRect.set(left, top, left + barWidth, bottom);
-                canvas.drawRoundRect(barRect, 6f, 6f, barPaint);
-            }
-        }
-    }
-
-    private static class TunerScaleView extends View {
-        interface OnTuneListener {
-            void onTuneFrequency(float targetFreq, boolean commitPlay);
-        }
-
-        private float frequency = 98.1f;
-        private OnTuneListener tuneListener;
-        private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint needlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        TunerScaleView(Context context) {
-            super(context);
-            linePaint.setColor(Color.parseColor("#64748B"));
-            linePaint.setStrokeWidth(2f);
-
-            textPaint.setColor(Color.parseColor("#CBD5E1"));
-            textPaint.setTextSize(24f);
-            textPaint.setTextAlign(Paint.Align.CENTER);
-
-            needlePaint.setColor(Color.parseColor("#F43F5E"));
-            needlePaint.setStrokeWidth(5.5f);
-        }
-
-        void setOnTuneListener(OnTuneListener listener) {
-            this.tuneListener = listener;
-        }
-
-        void setFrequency(float freq) {
-            this.frequency = freq;
-            invalidate();
-        }
-
-        private float xToFrequency(float x) {
-            int w = getWidth();
-            if (w <= 0) return frequency;
-            float minFreq = 88.0f;
-            float maxFreq = 108.0f;
-            float frac = Math.max(0f, Math.min(1f, x / (float) w));
-            return minFreq + frac * (maxFreq - minFreq);
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent event) {
-            int action = event.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) {
-                float nextFreq = xToFrequency(event.getX());
-                this.frequency = nextFreq;
-                invalidate();
-                if (tuneListener != null) {
-                    tuneListener.onTuneFrequency(nextFreq, action == MotionEvent.ACTION_UP);
-                }
-                return true;
-            }
-            return super.onTouchEvent(event);
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            float w = getWidth();
-            float h = getHeight();
-            if (w <= 0 || h <= 0) return;
-
-            float minFreq = 88.0f;
-            float maxFreq = 108.0f;
-
-            for (int f = 90; f <= 106; f += 4) {
-                float frac = (f - minFreq) / (maxFreq - minFreq);
-                float x = frac * w;
-                canvas.drawText(String.valueOf(f), x, h * 0.35f, textPaint);
-            }
-
-            float tickTop = h * 0.55f;
-            int totalTicks = 40;
-            for (int i = 0; i <= totalTicks; i++) {
-                float x = (i * w) / totalTicks;
-                float tickLen = (i % 5 == 0) ? h * 0.25f : h * 0.14f;
-                canvas.drawLine(x, tickTop, x, tickTop + tickLen, linePaint);
-            }
-
-            float clamped = Math.max(minFreq, Math.min(maxFreq, frequency));
-            float nx = ((clamped - minFreq) / (maxFreq - minFreq)) * w;
-            canvas.drawLine(nx, h * 0.12f, nx, h * 0.95f, needlePaint);
-        }
-    }
-
-    private static class TunerKnobView extends View {
-        interface OnRotateListener {
-            void onRotateDelta(float deltaDegrees, float knobAngle);
-        }
-
-        private float angle = 0f;
-        private float lastTouchAngle = 0f;
-        private float hue;
-        private final long cycleDurationMs;
-        private ValueAnimator ambientAnimator;
-        private OnRotateListener rotateListener;
-
-        private final Paint ambientGlowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint ambientRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint outerRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint facePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint ledPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        TunerKnobView(Context context, long cycleDurationMs, float initialHue) {
-            super(context);
-            this.cycleDurationMs = cycleDurationMs;
-            this.hue = initialHue % 360f;
-
-            outerRingPaint.setColor(Color.parseColor("#1F2937"));
-            facePaint.setColor(Color.parseColor("#9CA3AF"));
-            ledPaint.setColor(Color.parseColor("#22C55E"));
-
-            ambientRingPaint.setStyle(Paint.Style.STROKE);
-            ambientRingPaint.setStrokeWidth(5.5f);
-
-            startAmbientAnimation();
-        }
-
-        private void startAmbientAnimation() {
-            if (ambientAnimator != null) return;
-            ambientAnimator = ValueAnimator.ofFloat(hue, hue + 360f);
-            ambientAnimator.setDuration(cycleDurationMs);
-            ambientAnimator.setRepeatCount(ValueAnimator.INFINITE);
-            ambientAnimator.setRepeatMode(ValueAnimator.RESTART);
-            ambientAnimator.setInterpolator(new LinearInterpolator());
-            ambientAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-                @Override
-                public void onAnimationUpdate(ValueAnimator animation) {
-                    hue = ((Float) animation.getAnimatedValue()) % 360f;
-                    invalidate();
-                }
-            });
-            ambientAnimator.start();
-        }
-
-        void stopAmbientAnimation() {
-            if (ambientAnimator != null) {
-                ambientAnimator.cancel();
-                ambientAnimator = null;
-            }
-        }
-
-        void setOnRotateListener(OnRotateListener listener) {
-            this.rotateListener = listener;
-        }
-
-        void setAngle(float angle) {
-            this.angle = angle;
-            invalidate();
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent event) {
-            float cx = getWidth() / 2f;
-            float cy = getHeight() / 2f;
-            float dx = event.getX() - cx;
-            float dy = event.getY() - cy;
-            float touchAngle = (float) Math.toDegrees(Math.atan2(dy, dx));
-
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                lastTouchAngle = touchAngle;
-                return true;
-            } else if (event.getAction() == MotionEvent.ACTION_MOVE) {
-                float diff = touchAngle - lastTouchAngle;
-                if (diff > 180f) diff -= 360f;
-                if (diff < -180f) diff += 360f;
-                angle += diff;
-                lastTouchAngle = touchAngle;
-                invalidate();
-                if (rotateListener != null) {
-                    rotateListener.onRotateDelta(diff, angle);
-                }
-                return true;
-            }
-            return super.onTouchEvent(event);
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            float w = getWidth();
-            float h = getHeight();
-            float cx = w / 2f;
-            float cy = h / 2f;
-            float maxR = Math.min(cx, cy);
-            float knobRadius = maxR * 0.78f;
-
-            int primaryColor = Color.HSVToColor(225, new float[]{hue, 0.95f, 1.0f});
-            int secondaryColor = Color.HSVToColor(225, new float[]{(hue + 90f) % 360f, 0.95f, 1.0f});
-            int glowCenter = Color.HSVToColor(120, new float[]{hue, 0.90f, 1.0f});
-            int glowMid = Color.HSVToColor(45, new float[]{(hue + 45f) % 360f, 0.90f, 1.0f});
-
-            ambientGlowPaint.setShader(new android.graphics.RadialGradient(
-                    cx, cy, maxR * 0.98f,
-                    new int[]{glowCenter, glowMid, Color.TRANSPARENT},
-                    new float[]{0.66f, 0.86f, 1.0f},
-                    Shader.TileMode.CLAMP));
-            canvas.drawCircle(cx, cy, maxR * 0.98f, ambientGlowPaint);
-
-            ambientRingPaint.setShader(new LinearGradient(
-                    cx - knobRadius, cy - knobRadius, cx + knobRadius, cy + knobRadius,
-                    primaryColor, secondaryColor, Shader.TileMode.CLAMP));
-            canvas.drawCircle(cx, cy, knobRadius * 1.05f, ambientRingPaint);
-
-            outerRingPaint.setShader(new LinearGradient(
-                    0, 0, w, h,
-                    Color.parseColor("#27272A"),
-                    Color.parseColor("#09090B"),
-                    Shader.TileMode.CLAMP));
-            canvas.drawCircle(cx, cy, knobRadius, outerRingPaint);
-
-            float innerR = knobRadius * 0.74f;
-            facePaint.setShader(new android.graphics.RadialGradient(
-                    cx, cy, innerR,
-                    new int[]{Color.parseColor("#E4E4E7"), Color.parseColor("#71717A"), Color.parseColor("#3F3F46")},
-                    new float[]{0.0f, 0.75f, 1.0f},
-                    Shader.TileMode.CLAMP));
-            canvas.drawCircle(cx, cy, innerR, facePaint);
-
-            canvas.save();
-            canvas.rotate(angle, cx, cy);
-            canvas.drawCircle(cx, cy - innerR * 0.65f, knobRadius * 0.055f, ledPaint);
-            canvas.restore();
-        }
     }
 }
