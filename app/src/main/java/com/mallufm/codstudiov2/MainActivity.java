@@ -167,60 +167,74 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }
     }
 
+    private boolean containsAny(String text, String... keys) {
+        for (String k : keys) {
+            if (text.contains(k)) return true;
+        }
+        return false;
+    }
+
     private String generateSmartReply(String heard) {
         String lower = heard.toLowerCase(Locale.ROOT).trim();
         String nowTime = new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(new Date());
+        String nowDate = new SimpleDateFormat("dd MMM yyyy, EEEE", Locale.getDefault()).format(new Date());
 
+        if (containsAny(lower, "നിർത്തു", "ഓഫ്", "മതി", "stop", "turn off", "mic off", "close mic")) {
+            stopContinuousMic(false);
+            return useMalayalam ? "മൈക്ക് ഓഫ് ചെയ്തു." : "Mic turned off.";
+        }
+
+        if (containsAny(lower, "സേവ്", "save file", "save")) {
+            saveFile();
+            return useMalayalam ? "ഫയൽ സേവ് ചെയ്തു." : "File saved.";
+        }
+
+        if (containsAny(lower, "കോപ്പി", "copy")) {
+            copyAllToClipboard();
+            return useMalayalam ? "കോഡ് ക്ലിപ്പ്ബോർഡിലേക്ക് കോപ്പി ചെയ്തു." : "Copied code to clipboard.";
+        }
+
+        if (containsAny(lower, "സമയം", "ടൈം", "എത്ര മണി", "time")) {
+            return useMalayalam ? "ഇപ്പോൾ സമയം " + nowTime + " ആണ്." : "Current time is " + nowTime + ".";
+        }
+
+        if (containsAny(lower, "തീയതി", "ദിവസം", "ഇന്ന്", "date", "today", "day")) {
+            return useMalayalam ? "ഇന്ന് " + nowDate + " ആണ്." : "Today is " + nowDate + ".";
+        }
+
+        if (containsAny(lower, "നമസ്കാരം", "ഹലോ", "ഹായ്", "hello", "hi", "hey")) {
+            return useMalayalam ? "നമസ്കാരം! പറയൂ, എന്താണ് വേണ്ടത്?" : "Hello! What can I do for you?";
+        }
+
+        if (containsAny(lower, "സുഖമാണോ", "എങ്ങനെയുണ്ട്", "സുഖം", "how are you", "how r u", "wassup")) {
+            return useMalayalam ? "എനിക്ക് കുഴപ്പമില്ല, നന്നായിരിക്കുന്നു. നിങ്ങൾക്ക് എങ്ങനെയുണ്ട്?" : "I am doing good. How are you doing?";
+        }
+
+        if (containsAny(lower, "പേര്", "ആരാണ്", "നീ ആര്", "who are you", "your name", "name")) {
+            return useMalayalam ? "ഞാൻ കോഡ് സ്റ്റുഡിയോ വോയിസ് അസിസ്റ്റന്റ് ആണ്." : "I am the Cod Studio voice assistant.";
+        }
+
+        if (containsAny(lower, "പൈത്തൺ", "python")) {
+            insertSnippet("#!/usr/bin/env python3\n\ndef main():\n    print(\"Hello\")\n\nif __name__ == \"__main__\":\n    main()\n");
+            return useMalayalam ? "പൈത്തൺ കോഡ് എഡിറ്ററിൽ ചേർത്തു." : "Inserted Python code into editor.";
+        }
+
+        if (containsAny(lower, "എച്ച് ടി എം എൽ", "html")) {
+            insertSnippet("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Page</title></head>\n<body><h1>Hello</h1></body>\n</html>\n");
+            return useMalayalam ? "HTML കോഡ് എഡിറ്ററിൽ ചേർത്തു." : "Inserted HTML code into editor.";
+        }
+
+        if (containsAny(lower, "സഹായം", "എന്ത് ചെയ്യാം", "help", "what can you do")) {
+            return useMalayalam
+                    ? "സമയം, തീയതി ചോദിക്കാം; സേവ്, കോപ്പി, പൈത്തൺ, HTML അല്ലെങ്കിൽ നിർത്തു എന്ന് പറയാം."
+                    : "You can ask time or date, or say save, copy, python, html, or stop.";
+        }
+
+        // Direct concise answer without repetitive filler prefixes
         if (useMalayalam) {
-            if (lower.contains("നമസ്കാരം") || lower.contains("ഹലോ") || lower.contains("hello") || lower.contains("hi")) {
-                return "നമസ്കാരം! ഞാൻ ഇവിടെയുണ്ട്, എന്താണ് വേണ്ടത്?";
-            }
-            if (lower.contains("സുഖമാണോ") || lower.contains("എങ്ങനെയുണ്ട്") || lower.contains("how are you")) {
-                return "എനിക്ക് നല്ല സുഖമാണ്! നിങ്ങൾക്ക് എന്താണ് സഹായം വേണ്ടത്?";
-            }
-            if (lower.contains("സമയം") || lower.contains("time")) {
-                return "ഇപ്പോൾ സമയം " + nowTime + " ആണ്.";
-            }
-            if (lower.contains("പേര്") || lower.contains("ആരാണ്") || lower.contains("who are you") || lower.contains("name")) {
-                return "ഞാൻ കോഡ് സ്റ്റുഡിയോ വോയിസ് അസിസ്റ്റന്റ് ആണ്.";
-            }
-            if (lower.contains("നിർത്തു") || lower.contains("ഓഫ്") || lower.contains("stop")) {
-                stopContinuousMic(false);
-                return "ശരി, മൈക്ക് ഓഫ് ചെയ്തു.";
-            }
-            if (lower.contains("സേവ്") || lower.contains("save")) {
-                saveFile();
-                return "ഫയൽ സേവ് ചെയ്തിട്ടുണ്ട്.";
-            }
-            if (heard.endsWith("?") || lower.contains("എന്താണ്") || lower.contains("എങ്ങനെ") || lower.contains("എവിടെ") || lower.contains("എപ്പോൾ") || lower.contains("എന്തുകൊണ്ട്")) {
-                return heard + " എന്നതിനെക്കുറിച്ച് ഞാൻ നോക്കാം. കോഡിലോ ഫയലിലോ എന്തെങ്കിലും മാറ്റം വരുത്തണോ?";
-            }
-            return "ശരി, '" + heard + "' എന്നത് ഞാൻ ശ്രദ്ധിച്ചു. ഇതിൽ എന്താണ് അടുത്തതായി ചെയ്യേണ്ടത്?";
+            return "കേട്ടു: " + heard + ". ഇതിന് എന്ത് മറുപടിയാണ് വേണ്ടതെന്ന് പറഞ്ഞാൽ ഞാൻ അപ്‌ഡേറ്റ് ചെയ്യാം.";
         } else {
-            if (lower.contains("hello") || lower.contains("hi") || lower.contains("hey")) {
-                return "Hey there! How can I help you with your code today?";
-            }
-            if (lower.contains("how are you")) {
-                return "I am doing great and ready to help. What are you working on?";
-            }
-            if (lower.contains("time")) {
-                return "The current time is " + nowTime + ".";
-            }
-            if (lower.contains("who are you") || lower.contains("your name")) {
-                return "I am your Cod Studio voice assistant.";
-            }
-            if (lower.contains("stop") || lower.contains("turn off") || lower.contains("mic off")) {
-                stopContinuousMic(false);
-                return "Okay, turning the mic off.";
-            }
-            if (lower.contains("save file") || lower.equals("save")) {
-                saveFile();
-                return "I have saved your file.";
-            }
-            if (heard.endsWith("?") || lower.startsWith("what ") || lower.startsWith("how ") || lower.startsWith("why ") || lower.startsWith("where ") || lower.startsWith("when ")) {
-                return "That's a good question about " + heard.replace("?", "") + ". Want me to add a note or snippet for it in the editor?";
-            }
-            return "Got it. I added '" + heard + "' to your editor. Would you like to do anything else with it?";
+            return "Heard: " + heard + ". Tell me the exact response you want for this and I will add it.";
         }
     }
 
