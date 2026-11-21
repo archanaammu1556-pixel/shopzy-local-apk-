@@ -6,6 +6,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -32,17 +33,28 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity implements TextToSpeech.OnInitListener {
 
     private static final int REQ_MIC_PERM = 102;
     private static final int REQ_VOICE_FALLBACK = 103;
+    private static final String PREFS_NAME = "cod_studio_prefs";
+    private static final String KEY_API = "gemini_api_key";
 
     private static final String BG = "#0D1117";
     private static final String PANEL = "#161B22";
@@ -54,6 +66,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private static final String TEXT_DIM = "#8B949E";
 
     private EditText filePathInput;
+    private EditText apiKeyInput;
     private EditText codeEditor;
     private TextView statusText;
     private Button btnLang;
@@ -61,13 +74,16 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private TextToSpeech tts;
     private boolean ttsReady = false;
-    private boolean useMalayalam = false;
+    private boolean useMalayalam = true;
 
     private SpeechRecognizer speechRecognizer;
     private boolean useFallbackIntentMode = false;
     private boolean continuousMicActive = false;
     private boolean isListeningNow = false;
+
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
+    private final ArrayList<String> chatHistory = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,11 +97,27 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }
     }
 
+    private void saveApiKeyToPrefs() {
+        if (apiKeyInput == null) return;
+        String k = apiKeyInput.getText().toString().trim();
+        SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        sp.edit().putString(KEY_API, k).apply();
+    }
+
+    private String getSavedApiKey() {
+        if (apiKeyInput != null) {
+            String typed = apiKeyInput.getText().toString().trim();
+            if (!typed.isEmpty()) return typed;
+        }
+        SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        return sp.getString(KEY_API, "").trim();
+    }
+
     private void initSpeechRecognizer() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             useFallbackIntentMode = true;
             if (statusText != null) {
-                statusText.setText("Using fallback voice loop • Tap Mic to start");
+                statusText.setText("Using fallback voice loop • Tap Mic");
             }
             return;
         }
@@ -101,7 +133,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                     isListeningNow = true;
                     if (statusText != null) {
                         statusText.setText(useMalayalam
-                                ? "മൈക്ക് ഓൺ ആണ് • സംസാരിക്കൂ (നിർത്താൻ Mic വീണ്ടും അമർത്തുക)"
+                                ? "മൈക്ക് ഓൺ • സംസാരിക്കൂ (നിർത്താൻ Mic അമർത്തുക)"
                                 : "Live Mic ON • Speak anytime (Tap Mic to stop)");
                     }
                 }
@@ -144,13 +176,6 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                             handleRecognizedText(matches.get(0));
                         }
                     }
-                    if (continuousMicActive) {
-                        mainHandler.postDelayed(() -> {
-                            if (continuousMicActive) {
-                                triggerSingleListenCycle();
-                            }
-                        }, 1200);
-                    }
                 }
 
                 @Override
@@ -161,9 +186,6 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             });
         } catch (Exception e) {
             useFallbackIntentMode = true;
-            if (statusText != null) {
-                statusText.setText("Fallback voice mode ready • Tap Mic");
-            }
         }
     }
 
@@ -174,67 +196,114 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         return false;
     }
 
-    private String generateSmartReply(String heard) {
+    private String localFallbackReply(String heard) {
         String lower = heard.toLowerCase(Locale.ROOT).trim();
         String nowTime = new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(new Date());
         String nowDate = new SimpleDateFormat("dd MMM yyyy, EEEE", Locale.getDefault()).format(new Date());
 
-        if (containsAny(lower, "നിർത്തു", "ഓഫ്", "മതി", "stop", "turn off", "mic off", "close mic")) {
+        if (containsAny(lower, "നിർത്തു", "ഓഫ്", "മതി", "stop", "turn off", "mic off")) {
             stopContinuousMic(false);
-            return useMalayalam ? "മൈക്ക് ഓഫ് ചെയ്തു." : "Mic turned off.";
+            return useMalayalam ? "ശരി, മൈക്ക് ഓഫ് ചെയ്തു." : "Okay, mic turned off.";
         }
-
         if (containsAny(lower, "സേവ്", "save file", "save")) {
             saveFile();
             return useMalayalam ? "ഫയൽ സേവ് ചെയ്തു." : "File saved.";
         }
-
         if (containsAny(lower, "കോപ്പി", "copy")) {
             copyAllToClipboard();
-            return useMalayalam ? "കോഡ് ക്ലിപ്പ്ബോർഡിലേക്ക് കോപ്പി ചെയ്തു." : "Copied code to clipboard.";
+            return useMalayalam ? "കോപ്പി ചെയ്തു." : "Copied to clipboard.";
         }
-
         if (containsAny(lower, "സമയം", "ടൈം", "എത്ര മണി", "time")) {
             return useMalayalam ? "ഇപ്പോൾ സമയം " + nowTime + " ആണ്." : "Current time is " + nowTime + ".";
         }
-
-        if (containsAny(lower, "തീയതി", "ദിവസം", "ഇന്ന്", "date", "today", "day")) {
+        if (containsAny(lower, "തീയതി", "ദിവസം", "ഇന്ന്", "date", "today")) {
             return useMalayalam ? "ഇന്ന് " + nowDate + " ആണ്." : "Today is " + nowDate + ".";
         }
-
         if (containsAny(lower, "നമസ്കാരം", "ഹലോ", "ഹായ്", "hello", "hi", "hey")) {
-            return useMalayalam ? "നമസ്കാരം! പറയൂ, എന്താണ് വേണ്ടത്?" : "Hello! What can I do for you?";
+            return useMalayalam ? "നമസ്കാരം! പറയൂ, എന്താണ് വിശേഷം?" : "Hey! What's up?";
         }
-
-        if (containsAny(lower, "സുഖമാണോ", "എങ്ങനെയുണ്ട്", "സുഖം", "how are you", "how r u", "wassup")) {
-            return useMalayalam ? "എനിക്ക് കുഴപ്പമില്ല, നന്നായിരിക്കുന്നു. നിങ്ങൾക്ക് എങ്ങനെയുണ്ട്?" : "I am doing good. How are you doing?";
+        if (containsAny(lower, "സുഖമാണോ", "എങ്ങനെയുണ്ട്", "how are you")) {
+            return useMalayalam ? "എനിക്ക് നല്ല സുഖം! നിങ്ങൾക്ക് എങ്ങനെയുണ്ട്?" : "I'm doing great! How about you?";
         }
+        return useMalayalam
+                ? "സ്മാർട്ട് മറുപടികൾക്കായി മുകളിൽ Gemini API Key നൽകുക. ഇപ്പോൾ കേട്ടത്: " + heard
+                : "Add your Gemini API Key above for smart AI replies. Heard: " + heard;
+    }
 
-        if (containsAny(lower, "പേര്", "ആരാണ്", "നീ ആര്", "who are you", "your name", "name")) {
-            return useMalayalam ? "ഞാൻ കോഡ് സ്റ്റുഡിയോ വോയിസ് അസിസ്റ്റന്റ് ആണ്." : "I am the Cod Studio voice assistant.";
-        }
+    private String callGeminiApi(String apiKey, String userMessage) {
+        HttpURLConnection conn = null;
+        try {
+            String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey;
+            URL url = new URL(endpoint);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(25000);
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            conn.setDoOutput(true);
 
-        if (containsAny(lower, "പൈത്തൺ", "python")) {
-            insertSnippet("#!/usr/bin/env python3\n\ndef main():\n    print(\"Hello\")\n\nif __name__ == \"__main__\":\n    main()\n");
-            return useMalayalam ? "പൈത്തൺ കോഡ് എഡിറ്ററിൽ ചേർത്തു." : "Inserted Python code into editor.";
-        }
+            String langInstruction = useMalayalam
+                    ? "Reply naturally, warmly, and clearly in Malayalam (matching the user's conversational tone). Keep spoken answers clear and concise without markdown symbols like asterisks or code fences."
+                    : "Reply naturally, warmly, and clearly in English (matching the user's conversational tone). Keep spoken answers clear and concise without markdown symbols.";
 
-        if (containsAny(lower, "എച്ച് ടി എം എൽ", "html")) {
-            insertSnippet("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Page</title></head>\n<body><h1>Hello</h1></body>\n</html>\n");
-            return useMalayalam ? "HTML കോഡ് എഡിറ്ററിൽ ചേർത്തു." : "Inserted HTML code into editor.";
-        }
+            StringBuilder contextBuilder = new StringBuilder();
+            contextBuilder.append(langInstruction).append("\n\n");
+            int startIdx = Math.max(0, chatHistory.size() - 6);
+            for (int i = startIdx; i < chatHistory.size(); i++) {
+                contextBuilder.append(chatHistory.get(i)).append("\n");
+            }
+            contextBuilder.append("User: ").append(userMessage).append("\nAssistant:");
 
-        if (containsAny(lower, "സഹായം", "എന്ത് ചെയ്യാം", "help", "what can you do")) {
-            return useMalayalam
-                    ? "സമയം, തീയതി ചോദിക്കാം; സേവ്, കോപ്പി, പൈത്തൺ, HTML അല്ലെങ്കിൽ നിർത്തു എന്ന് പറയാം."
-                    : "You can ask time or date, or say save, copy, python, html, or stop.";
-        }
+            JSONObject part = new JSONObject();
+            part.put("text", contextBuilder.toString());
 
-        // Direct concise answer without repetitive filler prefixes
-        if (useMalayalam) {
-            return "കേട്ടു: " + heard + ". ഇതിന് എന്ത് മറുപടിയാണ് വേണ്ടതെന്ന് പറഞ്ഞാൽ ഞാൻ അപ്‌ഡേറ്റ് ചെയ്യാം.";
-        } else {
-            return "Heard: " + heard + ". Tell me the exact response you want for this and I will add it.";
+            JSONObject content = new JSONObject();
+            content.put("parts", new JSONArray().put(part));
+
+            JSONObject body = new JSONObject();
+            body.put("contents", new JSONArray().put(content));
+
+            byte[] outBytes = body.toString().getBytes(StandardCharsets.UTF_8);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(outBytes);
+            }
+
+            int code = conn.getResponseCode();
+            InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+            StringBuilder sb = new StringBuilder();
+            if (is != null) {
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        sb.append(line);
+                    }
+                }
+            }
+
+            if (code < 200 || code >= 300) {
+                return null;
+            }
+
+            JSONObject respJson = new JSONObject(sb.toString());
+            JSONArray candidates = respJson.optJSONArray("candidates");
+            if (candidates != null && candidates.length() > 0) {
+                JSONObject c0 = candidates.getJSONObject(0);
+                JSONObject cContent = c0.optJSONObject("content");
+                if (cContent != null) {
+                    JSONArray parts = cContent.optJSONArray("parts");
+                    if (parts != null && parts.length() > 0) {
+                        String reply = parts.getJSONObject(0).optString("text", "").trim();
+                        if (!reply.isEmpty()) {
+                            return reply.replace("*", "").replace("#", "").trim();
+                        }
+                    }
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
         }
     }
 
@@ -242,13 +311,61 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         if (rawText == null) return;
         String heard = rawText.trim();
         if (heard.isEmpty()) return;
+
         if (!codeEditor.getText().toString().isEmpty()) {
             codeEditor.append("\n");
         }
         codeEditor.append(heard);
-        String reply = generateSmartReply(heard);
-        statusText.setText(reply);
-        speakText(reply);
+
+        String lower = heard.toLowerCase(Locale.ROOT);
+        if (containsAny(lower, "നിർത്തു", "ഓഫ്", "മതി", "stop", "turn off", "mic off")) {
+            String stopReply = localFallbackReply(heard);
+            statusText.setText(stopReply);
+            speakText(stopReply);
+            return;
+        }
+
+        String apiKey = getSavedApiKey();
+        if (apiKey.isEmpty()) {
+            String fallback = localFallbackReply(heard);
+            statusText.setText(fallback);
+            speakTextAndResume(fallback);
+            return;
+        }
+
+        saveApiKeyToPrefs();
+        if (statusText != null) {
+            statusText.setText(useMalayalam ? "മറുപടി തയ്യാറാക്കുന്നു..." : "Thinking...");
+        }
+
+        bgExecutor.execute(() -> {
+            String aiReply = callGeminiApi(apiKey, heard);
+            final String finalReply = (aiReply != null && !aiReply.isEmpty())
+                    ? aiReply
+                    : localFallbackReply(heard);
+
+            chatHistory.add("User: " + heard);
+            chatHistory.add("Assistant: " + finalReply);
+
+            mainHandler.post(() -> {
+                if (statusText != null) {
+                    statusText.setText(finalReply);
+                }
+                speakTextAndResume(finalReply);
+            });
+        });
+    }
+
+    private void speakTextAndResume(String text) {
+        speakText(text);
+        if (continuousMicActive) {
+            long delayMs = Math.min(4500L, Math.max(1500L, text.length() * 65L));
+            mainHandler.postDelayed(() -> {
+                if (continuousMicActive && !isListeningNow) {
+                    triggerSingleListenCycle();
+                }
+            }, delayMs);
+        }
     }
 
     private void toggleContinuousMic() {
@@ -256,6 +373,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             stopContinuousMic(true);
             return;
         }
+
+        saveApiKeyToPrefs();
 
         if (!useFallbackIntentMode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -270,7 +389,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         continuousMicActive = true;
         updateMicButtonState();
-        String startMsg = useMalayalam ? "ലൈവ് മൈക്ക് ഓൺ ചെയ്തു, സംസാരിക്കൂ" : "Live mic started, keep speaking";
+        String startMsg = useMalayalam ? "ശരി, ഞാൻ കേൾക്കുന്നുണ്ട്. സംസാരിക്കൂ" : "I am listening, go ahead";
         speakText(startMsg);
         mainHandler.postDelayed(this::triggerSingleListenCycle, useFallbackIntentMode ? 1100 : 850);
     }
@@ -317,9 +436,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 isListeningNow = false;
                 continuousMicActive = false;
                 updateMicButtonState();
-                String msg = useMalayalam ? "സ്പീച്ച് എഞ്ചിൻ ഈ ഫോണിൽ ലഭ്യമല്ല" : "Speech engine unavailable on device";
+                String msg = useMalayalam ? "സ്പീച്ച് എഞ്ചിൻ ലഭ്യമല്ല" : "Speech engine unavailable";
                 statusText.setText(msg);
-                Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
             }
             return;
         }
@@ -348,15 +466,6 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 continuousMicActive = false;
                 updateMicButtonState();
                 statusText.setText(useMalayalam ? "മൈക്ക് ഓഫ് ചെയ്തു" : "Mic stopped");
-                return;
-            }
-
-            if (continuousMicActive) {
-                mainHandler.postDelayed(() -> {
-                    if (continuousMicActive) {
-                        triggerSingleListenCycle();
-                    }
-                }, 1300);
             }
         }
     }
@@ -377,13 +486,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             ttsReady = true;
             applyVoiceLanguage(false);
             if (statusText != null && !continuousMicActive) {
-                statusText.setText("TTS Ready • Tap Mic for Voice");
+                statusText.setText(useMalayalam ? "തയ്യാറാണ് • Mic അമർത്തി സംസാരിക്കൂ" : "Ready • Tap Mic to talk");
             }
         } else {
             ttsReady = false;
-            if (statusText != null) {
-                statusText.setText("TTS Init failed (" + status + ")");
-            }
         }
     }
 
@@ -394,49 +500,25 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 int mlRes = tts.setLanguage(new Locale("ml", "IN"));
                 if (mlRes == TextToSpeech.LANG_MISSING_DATA || mlRes == TextToSpeech.LANG_NOT_SUPPORTED) {
                     tts.setLanguage(Locale.US);
-                    if (statusText != null) {
-                        statusText.setText("Malayalam TTS missing • Using English voice");
-                    }
                     if (speakNotice) {
-                        tts.speak("Malayalam voice data not found. Using English.", TextToSpeech.QUEUE_FLUSH, null, "ml_fallback");
+                        tts.speak("Malayalam voice not installed. Using English voice.", TextToSpeech.QUEUE_FLUSH, null, "ml_fb");
                     }
-                    return;
-                }
-                if (statusText != null) {
-                    statusText.setText("Malayalam voice active");
                 }
             } else {
-                int enRes = tts.setLanguage(Locale.US);
-                if (enRes == TextToSpeech.LANG_MISSING_DATA || enRes == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    tts.setLanguage(Locale.ENGLISH);
-                }
-                if (statusText != null) {
-                    statusText.setText("English voice active");
-                }
+                tts.setLanguage(Locale.US);
             }
-        } catch (Exception e) {
-            if (statusText != null) {
-                statusText.setText("Voice error: " + e.getMessage());
-            }
-        }
+        } catch (Exception ignored) {}
     }
 
     private void speakText(String text) {
         String say = (text == null || text.trim().isEmpty())
-                ? (useMalayalam ? "നമസ്കാരം, കോഡ് സ്റ്റുഡിയോ തയ്യാറാണ്" : "Hello, Cod Studio is ready")
+                ? (useMalayalam ? "നമസ്കാരം" : "Hello")
                 : text.trim();
 
-        if (!ttsReady || tts == null) {
-            Toast.makeText(this, "Voice starting, try again", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
+        if (!ttsReady || tts == null) return;
         applyVoiceLanguage(false);
-        String toSay = say.length() > 350 ? say.substring(0, 350) : say;
+        String toSay = say.length() > 450 ? say.substring(0, 450) : say;
         tts.speak(toSay, TextToSpeech.QUEUE_FLUSH, null, "cod_studio_utterance");
-        if (statusText != null && !continuousMicActive) {
-            statusText.setText("Speaking: " + toSay);
-        }
     }
 
     @Override
@@ -470,12 +552,12 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         header.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         topRow.addView(header, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        btnLang = makeBtn("Lang: EN", PURPLE, Color.WHITE);
+        btnLang = makeBtn("Lang: ML", PURPLE, Color.WHITE);
         btnLang.setOnClickListener(v -> {
             useMalayalam = !useMalayalam;
             btnLang.setText(useMalayalam ? "Lang: ML" : "Lang: EN");
             applyVoiceLanguage(true);
-            speakText(useMalayalam ? "മലയാളം വോയിസ് സജീവമാക്കി" : "English voice activated");
+            speakText(useMalayalam ? "മലയാളം സജീവമാക്കി" : "English activated");
         });
         topRow.addView(btnLang);
 
@@ -484,20 +566,58 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         topRow.addView(btnMic);
 
         Button btnSpeak = makeBtn("Speak", "#1F6FEB", Color.WHITE);
-        btnSpeak.setOnClickListener(v -> speakText(codeEditor.getText().toString()));
+        btnSpeak.setOnClickListener(v -> speakText(statusText.getText().toString()));
         topRow.addView(btnSpeak);
 
         statusText = new TextView(this);
         statusText.setText("Starting Voice Engine...");
-        statusText.setTextColor(Color.parseColor(TEXT_DIM));
-        statusText.setTextSize(12f);
-        statusText.setPadding(0, 8, 0, 12);
+        statusText.setTextColor(Color.parseColor("#E6EDF3"));
+        statusText.setTextSize(13f);
+        statusText.setPadding(0, 10, 0, 10);
         root.addView(statusText);
+
+        SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String savedKey = sp.getString(KEY_API, "");
+
+        LinearLayout apiRow = new LinearLayout(this);
+        apiRow.setOrientation(LinearLayout.HORIZONTAL);
+        apiRow.setGravity(Gravity.CENTER_VERTICAL);
+        root.addView(apiRow);
+
+        apiKeyInput = new EditText(this);
+        apiKeyInput.setHint("Paste Gemini API Key here (AIza...)");
+        apiKeyInput.setHintTextColor(Color.parseColor(TEXT_DIM));
+        apiKeyInput.setText(savedKey);
+        apiKeyInput.setTextColor(Color.WHITE);
+        apiKeyInput.setTextSize(12f);
+        apiKeyInput.setSingleLine(true);
+        apiKeyInput.setTypeface(Typeface.MONOSPACE);
+        GradientDrawable apiBg = new GradientDrawable();
+        apiBg.setColor(Color.parseColor(PANEL));
+        apiBg.setStroke(2, Color.parseColor(BORDER));
+        apiBg.setCornerRadius(14f);
+        apiKeyInput.setBackground(apiBg);
+        apiKeyInput.setPadding(18, 12, 18, 12);
+        LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        aLp.setMargins(0, 0, 10, 0);
+        apiRow.addView(apiKeyInput, aLp);
+
+        Button btnSaveKey = makeBtn("Save Key", PURPLE, Color.WHITE);
+        btnSaveKey.setOnClickListener(v -> {
+            saveApiKeyToPrefs();
+            String msg = useMalayalam ? "API Key സേവ് ചെയ്തു" : "API Key saved";
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            statusText.setText(msg);
+        });
+        apiRow.addView(btnSaveKey);
 
         LinearLayout pathRow = new LinearLayout(this);
         pathRow.setOrientation(LinearLayout.HORIZONTAL);
         pathRow.setGravity(Gravity.CENTER_VERTICAL);
-        root.addView(pathRow);
+        LinearLayout.LayoutParams prLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        prLp.setMargins(0, 10, 0, 0);
+        root.addView(pathRow, prLp);
 
         String defaultFile = new File(Environment.getExternalStorageDirectory(), "Download/snippet.py").getAbsolutePath();
         filePathInput = new EditText(this);
@@ -511,7 +631,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         pathBg.setStroke(2, Color.parseColor(BORDER));
         pathBg.setCornerRadius(14f);
         filePathInput.setBackground(pathBg);
-        filePathInput.setPadding(18, 14, 18, 14);
+        filePathInput.setPadding(18, 12, 18, 12);
         LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         pLp.setMargins(0, 0, 10, 0);
         pathRow.addView(filePathInput, pLp);
@@ -528,7 +648,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         snipScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sLp.setMargins(0, 14, 0, 12);
+        sLp.setMargins(0, 12, 0, 10);
         root.addView(snipScroll, sLp);
 
         LinearLayout snipRow = new LinearLayout(this);
@@ -547,23 +667,14 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         snipRow.addView(bCopy);
         snipRow.addView(bTermux);
 
-        bPy.setOnClickListener(v -> {
-            insertSnippet("#!/usr/bin/env python3\n\ndef main():\n    print(\"Hello from Cod Studio\")\n\nif __name__ == \"__main__\":\n    main()\n");
-            speakText(useMalayalam ? "പൈത്തൺ കോഡ് ചേർത്തു" : "Python snippet inserted");
-        });
-        bGit.setOnClickListener(v -> {
-            insertSnippet("git status && git add -A && git commit -m \"Update code\" && git push\n");
-            speakText(useMalayalam ? "ജിറ്റ് കമാൻഡ് ചേർത്തു" : "Git command inserted");
-        });
-        bHtml.setOnClickListener(v -> {
-            insertSnippet("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Cod Studio</title></head>\n<body><h1>Hello Cod Studio</h1></body>\n</html>\n");
-            speakText(useMalayalam ? "എച്ച് ടി എം എൽ ടെംപ്ലേറ്റ് ചേർത്തു" : "HTML template inserted");
-        });
+        bPy.setOnClickListener(v -> insertSnippet("#!/usr/bin/env python3\n\ndef main():\n    print(\"Hello from Cod Studio\")\n\nif __name__ == \"__main__\":\n    main()\n"));
+        bGit.setOnClickListener(v -> insertSnippet("git status && git add -A && git commit -m \"Update code\" && git push\n"));
+        bHtml.setOnClickListener(v -> insertSnippet("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Cod Studio</title></head>\n<body><h1>Hello Cod Studio</h1></body>\n</html>\n"));
         bCopy.setOnClickListener(v -> copyAllToClipboard());
         bTermux.setOnClickListener(v -> launchTermux());
 
         codeEditor = new EditText(this);
-        codeEditor.setHint("# Tap Mic for live continuous voice, or write code here...");
+        codeEditor.setHint("# Transcript / code editor...");
         codeEditor.setHintTextColor(Color.parseColor(TEXT_DIM));
         codeEditor.setTextColor(Color.parseColor("#E6EDF3"));
         codeEditor.setTextSize(14f);
@@ -604,7 +715,6 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private void insertSnippet(String snippet) {
         int start = Math.max(0, codeEditor.getSelectionStart());
         codeEditor.getText().insert(start, snippet);
-        statusText.setText("Inserted snippet");
     }
 
     private void copyAllToClipboard() {
@@ -612,10 +722,6 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         if (cm != null) {
             ClipData clip = ClipData.newPlainText("CodStudio", codeEditor.getText().toString());
             cm.setPrimaryClip(clip);
-            String msg = useMalayalam ? "കോഡ് കോപ്പി ചെയ്തു" : "Copied to clipboard";
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
-            statusText.setText(msg);
-            speakText(msg);
         }
     }
 
@@ -627,20 +733,13 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             } else {
                 startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://termux.dev")));
             }
-        } catch (Exception e) {
-            statusText.setText("Could not launch Termux");
-        }
+        } catch (Exception ignored) {}
     }
 
     private void loadFile() {
         String p = filePathInput.getText().toString().trim();
         File f = new File(p);
-        if (!f.exists() || !f.isFile()) {
-            String msg = useMalayalam ? "ഫയൽ കണ്ടെത്താനായില്ല" : "File not found";
-            statusText.setText(msg + ": " + p);
-            speakText(msg);
-            return;
-        }
+        if (!f.exists() || !f.isFile()) return;
         StringBuilder sb = new StringBuilder();
         try (BufferedReader br = new BufferedReader(new FileReader(f))) {
             String line;
@@ -648,12 +747,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 sb.append(line).append("\n");
             }
             codeEditor.setText(sb.toString());
-            String msg = useMalayalam ? "ഫയൽ ലോഡ് ചെയ്തു" : "Loaded " + f.getName();
-            statusText.setText(msg);
-            speakText(msg);
-        } catch (Exception e) {
-            statusText.setText("Read error: " + e.getMessage());
-        }
+        } catch (Exception ignored) {}
     }
 
     private void saveFile() {
@@ -668,18 +762,14 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                  OutputStreamWriter osw = new OutputStreamWriter(fos, StandardCharsets.UTF_8)) {
                 osw.write(codeEditor.getText().toString());
             }
-            String msg = useMalayalam ? "ഫയൽ സേവ് ചെയ്തു" : "Saved file";
-            statusText.setText(msg + ": " + f.getAbsolutePath());
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
-            speakText(msg);
-        } catch (Exception e) {
-            statusText.setText("Save error: " + e.getMessage());
-        }
+        } catch (Exception ignored) {}
     }
 
     @Override
     protected void onDestroy() {
+        saveApiKeyToPrefs();
         stopContinuousMic(false);
+        bgExecutor.shutdownNow();
         if (speechRecognizer != null) {
             speechRecognizer.destroy();
         }
