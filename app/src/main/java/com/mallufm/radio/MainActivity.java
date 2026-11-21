@@ -1,4 +1,4 @@
-package com.mallufm.codstudio;
+package com.mallufm.codstudiov2;
 
 import android.app.Activity;
 import android.content.ClipData;

@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.mallufm.radio'
+    namespace 'com.mallufm.codstudiov2'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.mallufm.radio"
+        applicationId "com.mallufm.codstudiov2"
         minSdk 21
         targetSdk 34
         versionCode 1
