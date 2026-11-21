@@ -33,12 +33,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.OutputStreamWriter;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -46,6 +41,12 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -83,6 +84,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
+    private final OkHttpClient httpClient = new OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(25, TimeUnit.SECONDS)
+            .build();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -116,7 +121,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             useFallbackIntentMode = true;
             if (statusText != null) {
-                statusText.setText("Using fallback voice loop • Tap Mic");
+                statusText.setText("Fallback voice loop ready • Tap Mic");
             }
             return;
         }
@@ -213,28 +218,19 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             return useMalayalam ? "കോപ്പി ചെയ്തു." : "Copied.";
         }
         if (containsAny(lower, "സമയം", "ടൈം", "എത്ര മണി", "time")) {
-            return useMalayalam ? nowTime : nowTime;
+            return nowTime;
         }
         if (containsAny(lower, "തീയതി", "ദിവസം", "ഇന്ന്", "date", "today")) {
-            return useMalayalam ? nowDate : nowDate;
+            return nowDate;
         }
         return useMalayalam
-                ? "മുകളിൽ Gemini API Key നൽകി Save Key അമർത്തുക."
-                : "Enter Gemini API Key above and tap Save Key.";
+                ? "മുകളിൽ API Key നൽകി Save Key അമർത്തുക."
+                : "Enter API Key above and tap Save Key.";
     }
 
     private String callGeminiDirectAnswer(String apiKey, String userQuestion) {
-        HttpURLConnection conn = null;
         try {
             String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey;
-            URL url = new URL(endpoint);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(25000);
-            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-            conn.setDoOutput(true);
-
             String strictRule = useMalayalam
                     ? "ചോദ്യത്തിന് മാത്രം നേരിട്ടുള്ള കൃത്യമായ മറുപടി മലയാളത്തിൽ നൽകുക. തിരിച്ചു ചോദ്യങ്ങൾ ചോദിക്കുകയോ, വിപരീത കാര്യങ്ങൾ പറയുകയോ, മുൻ സംഭാഷണങ്ങൾ ചേർക്കുകയോ അരുത്. അക്ഷര ചിഹ്നങ്ങൾ (*, #) ഒഴിവാക്കുക."
                     : "Give ONLY the direct, accurate answer to the user's question in English. Do NOT ask follow-up questions, do NOT state opposite/unrelated things, and do NOT use markdown symbols like * or #.";
@@ -247,50 +243,44 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             JSONObject content = new JSONObject();
             content.put("parts", new JSONArray().put(part));
 
-            JSONObject body = new JSONObject();
-            body.put("contents", new JSONArray().put(content));
+            JSONObject bodyJson = new JSONObject();
+            bodyJson.put("contents", new JSONArray().put(content));
 
-            byte[] outBytes = body.toString().getBytes(StandardCharsets.UTF_8);
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(outBytes);
-            }
+            RequestBody reqBody = RequestBody.create(
+                    bodyJson.toString(),
+                    MediaType.get("application/json; charset=utf-8")
+            );
 
-            int code = conn.getResponseCode();
-            InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
-            StringBuilder sb = new StringBuilder();
-            if (is != null) {
-                try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        sb.append(line);
-                    }
+            Request request = new Request.Builder()
+                    .url(endpoint)
+                    .post(reqBody)
+                    .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                String respStr = response.body() != null ? response.body().string() : "";
+                if (!response.isSuccessful()) {
+                    return "HTTP " + response.code() + " error. Check API key.";
                 }
-            }
 
-            if (code < 200 || code >= 300) {
-                return null;
-            }
-
-            JSONObject respJson = new JSONObject(sb.toString());
-            JSONArray candidates = respJson.optJSONArray("candidates");
-            if (candidates != null && candidates.length() > 0) {
-                JSONObject c0 = candidates.getJSONObject(0);
-                JSONObject cContent = c0.optJSONObject("content");
-                if (cContent != null) {
-                    JSONArray parts = cContent.optJSONArray("parts");
-                    if (parts != null && parts.length() > 0) {
-                        String reply = parts.getJSONObject(0).optString("text", "").trim();
-                        if (!reply.isEmpty()) {
-                            return reply.replace("*", "").replace("#", "").trim();
+                JSONObject respJson = new JSONObject(respStr);
+                JSONArray candidates = respJson.optJSONArray("candidates");
+                if (candidates != null && candidates.length() > 0) {
+                    JSONObject c0 = candidates.getJSONObject(0);
+                    JSONObject cContent = c0.optJSONObject("content");
+                    if (cContent != null) {
+                        JSONArray parts = cContent.optJSONArray("parts");
+                        if (parts != null && parts.length() > 0) {
+                            String reply = parts.getJSONObject(0).optString("text", "").trim();
+                            if (!reply.isEmpty()) {
+                                return reply.replace("*", "").replace("#", "").trim();
+                            }
                         }
                     }
                 }
+                return "Empty response from Gemini.";
             }
-            return null;
         } catch (Exception e) {
-            return null;
-        } finally {
-            if (conn != null) conn.disconnect();
+            return "OkHttp error: " + e.getMessage();
         }
     }
 
@@ -326,11 +316,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }
 
         bgExecutor.execute(() -> {
-            String aiReply = callGeminiDirectAnswer(apiKey, heard);
-            final String finalReply = (aiReply != null && !aiReply.isEmpty())
-                    ? aiReply
-                    : directLocalAnswer(heard);
-
+            final String finalReply = callGeminiDirectAnswer(apiKey, heard);
             mainHandler.post(() -> {
                 if (statusText != null) {
                     statusText.setText(finalReply);
