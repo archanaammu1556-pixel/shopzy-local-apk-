@@ -14,7 +14,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
 import android.view.Gravity;
 import android.view.ViewGroup;
@@ -35,7 +39,6 @@ import java.util.Locale;
 
 public class MainActivity extends Activity implements TextToSpeech.OnInitListener {
 
-    private static final int REQ_SPEECH = 101;
     private static final int REQ_MIC_PERM = 102;
 
     private static final String BG = "#0D1117";
@@ -43,6 +46,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private static final String BORDER = "#30363D";
     private static final String ACCENT = "#58A6FF";
     private static final String GREEN = "#238636";
+    private static final String RED = "#DA3633";
     private static final String PURPLE = "#8957E5";
     private static final String TEXT_DIM = "#8B949E";
 
@@ -50,10 +54,16 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private EditText codeEditor;
     private TextView statusText;
     private Button btnLang;
+    private Button btnMic;
 
     private TextToSpeech tts;
     private boolean ttsReady = false;
     private boolean useMalayalam = false;
+
+    private SpeechRecognizer speechRecognizer;
+    private boolean continuousMicActive = false;
+    private boolean isListeningNow = false;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -61,9 +71,173 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         try {
             buildEditorUi();
             tts = new TextToSpeech(this, this);
+            initSpeechRecognizer();
         } catch (Exception e) {
             Toast.makeText(this, "Init error: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void initSpeechRecognizer() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            if (statusText != null) {
+                statusText.setText("Continuous SpeechRecognizer not available on device");
+            }
+            return;
+        }
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy();
+        }
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        speechRecognizer.setRecognitionListener(new RecognitionListener() {
+            @Override
+            public void onReadyForSpeech(Bundle params) {
+                isListeningNow = true;
+                if (statusText != null) {
+                    statusText.setText(useMalayalam ? "മൈക്ക് ഓൺ ആണ് • സംസാരിക്കൂ (നിർത്താൻ Mic വീണ്ടും അമർത്തുക)"
+                            : "Live Mic ON • Speak anytime (Tap Mic to stop)");
+                }
+            }
+
+            @Override
+            public void onBeginningOfSpeech() {
+                if (statusText != null) {
+                    statusText.setText(useMalayalam ? "കേൾക്കുന്നു..." : "Listening...");
+                }
+            }
+
+            @Override
+            public void onRmsChanged(float rmsdB) {}
+
+            @Override
+            public void onBufferReceived(byte[] buffer) {}
+
+            @Override
+            public void onEndOfSpeech() {
+                isListeningNow = false;
+            }
+
+            @Override
+            public void onError(int error) {
+                isListeningNow = false;
+                if (!continuousMicActive) return;
+                // Restart automatically on no-match / timeout so mic stays active until user turns it off
+                mainHandler.postDelayed(() -> {
+                    if (continuousMicActive) {
+                        triggerSingleListenCycle();
+                    }
+                }, 400);
+            }
+
+            @Override
+            public void onResults(Bundle results) {
+                isListeningNow = false;
+                if (results != null) {
+                    ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    if (matches != null && !matches.isEmpty()) {
+                        String heard = matches.get(0).trim();
+                        if (!heard.isEmpty()) {
+                            if (!codeEditor.getText().toString().isEmpty()) {
+                                codeEditor.append("\n");
+                            }
+                            codeEditor.append(heard);
+                            String reply = useMalayalam ? "നിങ്ങൾ പറഞ്ഞത്: " + heard : "You said: " + heard;
+                            statusText.setText(reply);
+                            speakText(reply);
+                        }
+                    }
+                }
+                if (continuousMicActive) {
+                    mainHandler.postDelayed(() -> {
+                        if (continuousMicActive) {
+                            triggerSingleListenCycle();
+                        }
+                    }, 1200);
+                }
+            }
+
+            @Override
+            public void onPartialResults(Bundle partialResults) {}
+
+            @Override
+            public void onEvent(int eventType, Bundle params) {}
+        });
+    }
+
+    private void toggleContinuousMic() {
+        if (continuousMicActive) {
+            stopContinuousMic(true);
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC_PERM);
+                return;
+            }
+        }
+
+        if (speechRecognizer == null) {
+            initSpeechRecognizer();
+        }
+        if (speechRecognizer == null) {
+            String msg = useMalayalam ? "ലൈവ് മൈക്ക് ലഭ്യമല്ല" : "Live speech engine unavailable";
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        continuousMicActive = true;
+        updateMicButtonState();
+        String startMsg = useMalayalam ? "ലൈവ് മൈക്ക് ഓൺ ചെയ്തു, സംസാരിക്കൂ" : "Live mic started, keep speaking";
+        speakText(startMsg);
+        mainHandler.postDelayed(this::triggerSingleListenCycle, 900);
+    }
+
+    private void stopContinuousMic(boolean announce) {
+        continuousMicActive = false;
+        isListeningNow = false;
+        mainHandler.removeCallbacksAndMessages(null);
+        if (speechRecognizer != null) {
+            try {
+                speechRecognizer.stopListening();
+                speechRecognizer.cancel();
+            } catch (Exception ignored) {}
+        }
+        updateMicButtonState();
+        String stopMsg = useMalayalam ? "മൈക്ക് ഓഫ് ചെയ്തു" : "Mic turned off";
+        if (statusText != null) {
+            statusText.setText(stopMsg);
+        }
+        if (announce) {
+            speakText(stopMsg);
+        }
+    }
+
+    private void triggerSingleListenCycle() {
+        if (!continuousMicActive || speechRecognizer == null || isListeningNow) return;
+        try {
+            Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            String langTag = useMalayalam ? "ml-IN" : "en-US";
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, langTag);
+            intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+            isListeningNow = true;
+            speechRecognizer.startListening(intent);
+        } catch (Exception e) {
+            isListeningNow = false;
+            if (statusText != null) {
+                statusText.setText("Mic error: " + e.getMessage());
+            }
+        }
+    }
+
+    private void updateMicButtonState() {
+        if (btnMic == null) return;
+        btnMic.setText(continuousMicActive ? "Mic ON" : "Mic");
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(Color.parseColor(continuousMicActive ? RED : GREEN));
+        gd.setStroke(1, Color.parseColor(BORDER));
+        gd.setCornerRadius(14f);
+        btnMic.setBackground(gd);
     }
 
     @Override
@@ -72,7 +246,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             ttsReady = true;
             applyVoiceLanguage(false);
             if (statusText != null) {
-                statusText.setText("TTS Ready • Tap Mic or Speak");
+                statusText.setText("TTS Ready • Tap Mic for Continuous Voice");
             }
         } else {
             ttsReady = false;
@@ -129,32 +303,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         applyVoiceLanguage(false);
         String toSay = say.length() > 350 ? say.substring(0, 350) : say;
         tts.speak(toSay, TextToSpeech.QUEUE_FLUSH, null, "cod_studio_utterance");
-        if (statusText != null) {
+        if (statusText != null && !continuousMicActive) {
             statusText.setText("Speaking: " + toSay);
-        }
-    }
-
-    private void startListening() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC_PERM);
-                return;
-            }
-        }
-        try {
-            Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            String langTag = useMalayalam ? "ml-IN" : "en-US";
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, langTag);
-            intent.putExtra(RecognizerIntent.EXTRA_PROMPT,
-                    useMalayalam ? "മലയാളത്തിൽ പറയൂ..." : "Speak now...");
-            startActivityForResult(intent, REQ_SPEECH);
-        } catch (Exception e) {
-            String msg = useMalayalam ? "വോയിസ് ഇൻപുട്ട് ലഭ്യമല്ല" : "Speech recognition not available";
-            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
-            if (statusText != null) {
-                statusText.setText(msg);
-            }
         }
     }
 
@@ -163,28 +313,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_MIC_PERM) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                startListening();
+                toggleContinuousMic();
             } else {
                 String msg = useMalayalam ? "മൈക്രോഫോൺ അനുമതി ആവശ്യമാണ്" : "Microphone permission required";
                 Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
-            }
-        }
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQ_SPEECH && resultCode == RESULT_OK && data != null) {
-            ArrayList<String> matches = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            if (matches != null && !matches.isEmpty()) {
-                String heard = matches.get(0);
-                if (!codeEditor.getText().toString().isEmpty()) {
-                    codeEditor.append("\n");
-                }
-                codeEditor.append(heard);
-                String reply = useMalayalam ? "നിങ്ങൾ പറഞ്ഞത്: " + heard : "You said: " + heard;
-                statusText.setText(reply);
-                speakText(reply);
             }
         }
     }
@@ -216,8 +348,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         });
         topRow.addView(btnLang);
 
-        Button btnMic = makeBtn("Mic", GREEN, Color.WHITE);
-        btnMic.setOnClickListener(v -> startListening());
+        btnMic = makeBtn("Mic", GREEN, Color.WHITE);
+        btnMic.setOnClickListener(v -> toggleContinuousMic());
         topRow.addView(btnMic);
 
         Button btnSpeak = makeBtn("Speak", "#1F6FEB", Color.WHITE);
@@ -300,7 +432,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         bTermux.setOnClickListener(v -> launchTermux());
 
         codeEditor = new EditText(this);
-        codeEditor.setHint("# Tap Mic to speak, or write code here...");
+        codeEditor.setHint("# Tap Mic for live continuous voice, or write code here...");
         codeEditor.setHintTextColor(Color.parseColor(TEXT_DIM));
         codeEditor.setTextColor(Color.parseColor("#E6EDF3"));
         codeEditor.setTextSize(14f);
@@ -416,6 +548,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     @Override
     protected void onDestroy() {
+        stopContinuousMic(false);
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy();
+        }
         if (tts != null) {
             tts.stop();
             tts.shutdown();
