@@ -83,7 +83,6 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
-    private final ArrayList<String> chatHistory = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -133,8 +132,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                     isListeningNow = true;
                     if (statusText != null) {
                         statusText.setText(useMalayalam
-                                ? "മൈക്ക് ഓൺ • സംസാരിക്കൂ (നിർത്താൻ Mic അമർത്തുക)"
-                                : "Live Mic ON • Speak anytime (Tap Mic to stop)");
+                                ? "മൈക്ക് ഓൺ • ചോദ്യം ചോദിക്കൂ"
+                                : "Live Mic ON • Ask your question");
                     }
                 }
 
@@ -196,14 +195,14 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         return false;
     }
 
-    private String localFallbackReply(String heard) {
+    private String directLocalAnswer(String heard) {
         String lower = heard.toLowerCase(Locale.ROOT).trim();
         String nowTime = new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(new Date());
-        String nowDate = new SimpleDateFormat("dd MMM yyyy, EEEE", Locale.getDefault()).format(new Date());
+        String nowDate = new SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(new Date());
 
         if (containsAny(lower, "നിർത്തു", "ഓഫ്", "മതി", "stop", "turn off", "mic off")) {
             stopContinuousMic(false);
-            return useMalayalam ? "ശരി, മൈക്ക് ഓഫ് ചെയ്തു." : "Okay, mic turned off.";
+            return useMalayalam ? "മൈക്ക് ഓഫ് ചെയ്തു." : "Mic turned off.";
         }
         if (containsAny(lower, "സേവ്", "save file", "save")) {
             saveFile();
@@ -211,26 +210,20 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }
         if (containsAny(lower, "കോപ്പി", "copy")) {
             copyAllToClipboard();
-            return useMalayalam ? "കോപ്പി ചെയ്തു." : "Copied to clipboard.";
+            return useMalayalam ? "കോപ്പി ചെയ്തു." : "Copied.";
         }
         if (containsAny(lower, "സമയം", "ടൈം", "എത്ര മണി", "time")) {
-            return useMalayalam ? "ഇപ്പോൾ സമയം " + nowTime + " ആണ്." : "Current time is " + nowTime + ".";
+            return useMalayalam ? nowTime : nowTime;
         }
         if (containsAny(lower, "തീയതി", "ദിവസം", "ഇന്ന്", "date", "today")) {
-            return useMalayalam ? "ഇന്ന് " + nowDate + " ആണ്." : "Today is " + nowDate + ".";
-        }
-        if (containsAny(lower, "നമസ്കാരം", "ഹലോ", "ഹായ്", "hello", "hi", "hey")) {
-            return useMalayalam ? "നമസ്കാരം! പറയൂ, എന്താണ് വിശേഷം?" : "Hey! What's up?";
-        }
-        if (containsAny(lower, "സുഖമാണോ", "എങ്ങനെയുണ്ട്", "how are you")) {
-            return useMalayalam ? "എനിക്ക് നല്ല സുഖം! നിങ്ങൾക്ക് എങ്ങനെയുണ്ട്?" : "I'm doing great! How about you?";
+            return useMalayalam ? nowDate : nowDate;
         }
         return useMalayalam
-                ? "സ്മാർട്ട് മറുപടികൾക്കായി മുകളിൽ Gemini API Key നൽകുക. ഇപ്പോൾ കേട്ടത്: " + heard
-                : "Add your Gemini API Key above for smart AI replies. Heard: " + heard;
+                ? "മുകളിൽ Gemini API Key നൽകി Save Key അമർത്തുക."
+                : "Enter Gemini API Key above and tap Save Key.";
     }
 
-    private String callGeminiApi(String apiKey, String userMessage) {
+    private String callGeminiDirectAnswer(String apiKey, String userQuestion) {
         HttpURLConnection conn = null;
         try {
             String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey;
@@ -242,20 +235,14 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
             conn.setDoOutput(true);
 
-            String langInstruction = useMalayalam
-                    ? "Reply naturally, warmly, and clearly in Malayalam (matching the user's conversational tone). Keep spoken answers clear and concise without markdown symbols like asterisks or code fences."
-                    : "Reply naturally, warmly, and clearly in English (matching the user's conversational tone). Keep spoken answers clear and concise without markdown symbols.";
+            String strictRule = useMalayalam
+                    ? "ചോദ്യത്തിന് മാത്രം നേരിട്ടുള്ള കൃത്യമായ മറുപടി മലയാളത്തിൽ നൽകുക. തിരിച്ചു ചോദ്യങ്ങൾ ചോദിക്കുകയോ, വിപരീത കാര്യങ്ങൾ പറയുകയോ, മുൻ സംഭാഷണങ്ങൾ ചേർക്കുകയോ അരുത്. അക്ഷര ചിഹ്നങ്ങൾ (*, #) ഒഴിവാക്കുക."
+                    : "Give ONLY the direct, accurate answer to the user's question in English. Do NOT ask follow-up questions, do NOT state opposite/unrelated things, and do NOT use markdown symbols like * or #.";
 
-            StringBuilder contextBuilder = new StringBuilder();
-            contextBuilder.append(langInstruction).append("\n\n");
-            int startIdx = Math.max(0, chatHistory.size() - 6);
-            for (int i = startIdx; i < chatHistory.size(); i++) {
-                contextBuilder.append(chatHistory.get(i)).append("\n");
-            }
-            contextBuilder.append("User: ").append(userMessage).append("\nAssistant:");
+            String prompt = strictRule + "\n\nQuestion: " + userQuestion + "\nDirect Answer:";
 
             JSONObject part = new JSONObject();
-            part.put("text", contextBuilder.toString());
+            part.put("text", prompt);
 
             JSONObject content = new JSONObject();
             content.put("parts", new JSONArray().put(part));
@@ -319,7 +306,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         String lower = heard.toLowerCase(Locale.ROOT);
         if (containsAny(lower, "നിർത്തു", "ഓഫ്", "മതി", "stop", "turn off", "mic off")) {
-            String stopReply = localFallbackReply(heard);
+            String stopReply = directLocalAnswer(heard);
             statusText.setText(stopReply);
             speakText(stopReply);
             return;
@@ -327,7 +314,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         String apiKey = getSavedApiKey();
         if (apiKey.isEmpty()) {
-            String fallback = localFallbackReply(heard);
+            String fallback = directLocalAnswer(heard);
             statusText.setText(fallback);
             speakTextAndResume(fallback);
             return;
@@ -335,17 +322,14 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         saveApiKeyToPrefs();
         if (statusText != null) {
-            statusText.setText(useMalayalam ? "മറുപടി തയ്യാറാക്കുന്നു..." : "Thinking...");
+            statusText.setText(useMalayalam ? "മറുപടി..." : "Answering...");
         }
 
         bgExecutor.execute(() -> {
-            String aiReply = callGeminiApi(apiKey, heard);
+            String aiReply = callGeminiDirectAnswer(apiKey, heard);
             final String finalReply = (aiReply != null && !aiReply.isEmpty())
                     ? aiReply
-                    : localFallbackReply(heard);
-
-            chatHistory.add("User: " + heard);
-            chatHistory.add("Assistant: " + finalReply);
+                    : directLocalAnswer(heard);
 
             mainHandler.post(() -> {
                 if (statusText != null) {
@@ -389,7 +373,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         continuousMicActive = true;
         updateMicButtonState();
-        String startMsg = useMalayalam ? "ശരി, ഞാൻ കേൾക്കുന്നുണ്ട്. സംസാരിക്കൂ" : "I am listening, go ahead";
+        String startMsg = useMalayalam ? "ചോദിക്കൂ" : "Ask";
         speakText(startMsg);
         mainHandler.postDelayed(this::triggerSingleListenCycle, useFallbackIntentMode ? 1100 : 850);
     }
@@ -420,7 +404,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         String langTag = useMalayalam ? "ml-IN" : "en-US";
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, langTag);
         intent.putExtra(RecognizerIntent.EXTRA_PROMPT,
-                useMalayalam ? "സംസാരിക്കൂ... (നിർത്താൻ Back അമർത്തുക)" : "Speak now... (Press Back to stop)");
+                useMalayalam ? "ചോദ്യം പറയൂ... (നിർത്താൻ Back അമർത്തുക)" : "Ask question... (Press Back to stop)");
         intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
         return intent;
     }
@@ -486,7 +470,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             ttsReady = true;
             applyVoiceLanguage(false);
             if (statusText != null && !continuousMicActive) {
-                statusText.setText(useMalayalam ? "തയ്യാറാണ് • Mic അമർത്തി സംസാരിക്കൂ" : "Ready • Tap Mic to talk");
+                statusText.setText(useMalayalam ? "തയ്യാറാണ്" : "Ready");
             }
         } else {
             ttsReady = false;
@@ -512,7 +496,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private void speakText(String text) {
         String say = (text == null || text.trim().isEmpty())
-                ? (useMalayalam ? "നമസ്കാരം" : "Hello")
+                ? (useMalayalam ? "തയ്യാറാണ്" : "Ready")
                 : text.trim();
 
         if (!ttsReady || tts == null) return;
@@ -557,7 +541,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             useMalayalam = !useMalayalam;
             btnLang.setText(useMalayalam ? "Lang: ML" : "Lang: EN");
             applyVoiceLanguage(true);
-            speakText(useMalayalam ? "മലയാളം സജീവമാക്കി" : "English activated");
+            speakText(useMalayalam ? "മലയാളം" : "English");
         });
         topRow.addView(btnLang);
 
